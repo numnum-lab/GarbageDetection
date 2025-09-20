@@ -4,12 +4,7 @@ from ultralytics import YOLO
 import tempfile
 from PIL import Image
 import numpy as np
-import os
 
-BASE_DIR = os.path.dirname(__file__) 
-MODEL_PATH = os.path.join(BASE_DIR, "models", "my_model.pt")
-print(f"Looking for model at: {MODEL_PATH}")
-print(f"File exists: {os.path.exists(MODEL_PATH)}")
 
 # Load YOLO model
 
