@@ -1,5 +1,5 @@
 streamlit
 ultralytics
-opencv-python==4.8.1.78
+opencv-python
 Pillow
-numpy==1.24.4
+numpy
