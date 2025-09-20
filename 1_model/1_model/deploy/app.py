@@ -7,7 +7,7 @@ import numpy as np
 
 
 # Load YOLO model
-model = YOLO("C:/Users/User/OneDrive - Thammasat University/Documents/School/GarbageDetection/GarbageDetection/1_model/1_model/deploy/models/my_model.pt")
+model = YOLO("my_model.pt")
 
 # YOLO class names
 yolo_classes = [
