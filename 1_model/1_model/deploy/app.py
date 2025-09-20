@@ -1,5 +1,5 @@
-import streamlit as st
 import cv2
+import streamlit as st
 from ultralytics import YOLO
 import tempfile
 from PIL import Image
