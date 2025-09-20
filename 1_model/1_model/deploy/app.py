@@ -1,5 +1,12 @@
 import streamlit as st
-import cv2
+
+try:
+    import cv2
+    st.success("OpenCV loaded successfully!")
+except Exception as e:
+    st.error(f"OpenCV failed to load: {e}")
+    st.stop()
+    
 from ultralytics import YOLO
 import tempfile
 from PIL import Image
