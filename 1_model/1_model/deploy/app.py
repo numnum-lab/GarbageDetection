@@ -7,7 +7,7 @@ import numpy as np
 
 
 # Load YOLO model
-model = YOLO("C:/Users/Student/Desktop/1_model/1_model/deploy/models/my_model.pt")
+model = YOLO("C:/Users/User/OneDrive - Thammasat University/Documents/School/GarbageDetection/GarbageDetection/1_model/1_model/deploy/models/my_model.pt")
 
 # YOLO class names
 yolo_classes = [
@@ -23,6 +23,34 @@ yolo_classes = [
     "trash",
 ]
 
+# Disposal instructions for each class
+disposal_messages = {
+    "battery": "⚡ **Battery detected!** Dispose in the **HAZARDOUS** bin.",
+    "biological": "🍃 **Biological waste detected!** Dispose in the **ORGANIC** bin.",
+    "cardboard": "📦 **Cardboard detected!** Flatten and dispose in the **RECYCLING** bin.",
+    "clothes": "👕 **Clothes detected!** Consider donating, or dispose in the **GENERAL** bin.",
+    "glass": "🍶 **Glass detected!** Dispose in the **RECYCLING** bin.",
+    "metal": "🔩 **Metal detected!** Dispose in the **RECYCLING** bin.",
+    "paper": "📄 **Paper detected!** Dispose in the **RECYCLING** bin.",
+    "plastic": "♻️ **Plastic detected!** Dispose in the **RECYCLING** bin.",
+    "shoes": "👟 **Shoes detected!** Consider donating, or dispose in the **GENERAL** bin.",
+    "trash": "🗑️ **General trash detected!** Dispose in the **GENERAL** bin.",
+}
+
+# Color coding for different waste categories
+waste_colors = {
+    "battery": "🟥",  # Red for hazardous
+    "biological": "🟢",  # Green for compost/organic
+    "cardboard": "🟡",  # Yellow for recycling
+    "clothes": "🟦",  # Blue for donation/textile
+    "glass": "🟡",  # Yellow for recycling
+    "metal": "🟡",  # Yellow for recycling
+    "paper": "🟡",  # Yellow for recycling
+    "plastic": "🟡",  # Yellow for recycling
+    "shoes": "🟦",  # Blue for donation/textile
+    "trash": "⬛",  # Black for general waste
+}
+
 st.set_page_config(
     page_icon="🔍",
     layout="wide",
@@ -37,9 +65,39 @@ if "is_webcam_active" not in st.session_state:
     st.session_state.is_webcam_active = False
 
 
+def display_detection_messages(detected_classes):
+    """Display disposal messages for detected objects with color coding"""
+    if detected_classes:
+        st.subheader("🎯 Detection Results:")
+        # Get unique detected classes
+        unique_classes = list(set(detected_classes))
+        
+        # Display messages in columns for better layout
+        if len(unique_classes) <= 2:
+            cols = st.columns(len(unique_classes))
+        else:
+            cols = st.columns(2)
+        
+        for i, class_name in enumerate(unique_classes):
+            col_index = i if len(unique_classes) <= 2 else i % 2
+            with cols[col_index]:
+                # Determine message type and color based on waste category
+                if class_name == "battery":
+                    st.error(f"🟥 {disposal_messages[class_name]}")
+                elif class_name == "biological":
+                    st.success(f"🟢 {disposal_messages[class_name]}")
+                elif class_name in ["cardboard", "glass", "metal", "paper", "plastic"]:
+                    st.warning(f"🟡 {disposal_messages[class_name]}")
+                elif class_name in ["clothes", "shoes"]:
+                    st.info(f"🟦 {disposal_messages[class_name]}")
+                else:  # trash
+                    st.error(f"⬛ {disposal_messages[class_name]}")
+
+
 # Function for live object detection using webcam
 def live_streaming(conf_threshold, selected_classes):
     stframe = st.empty()
+    message_container = st.empty()
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -76,6 +134,7 @@ def live_streaming(conf_threshold, selected_classes):
                 )
 
                 # Filter based on selected classes
+                detected_classes = []
                 if selected_classes:
                     filtered = [
                         (box, conf, class_id)
@@ -84,8 +143,11 @@ def live_streaming(conf_threshold, selected_classes):
                     ]
                     if filtered:
                         boxes, confs, class_ids = zip(*filtered)
+                        detected_classes = [yolo_classes[class_id] for class_id in class_ids]
                     else:
                         boxes, confs, class_ids = [], [], []
+                else:
+                    detected_classes = [yolo_classes[class_id] for class_id in class_ids]
 
                 # Draw bounding boxes and labels on the frame
                 for i, box in enumerate(boxes):
@@ -106,6 +168,10 @@ def live_streaming(conf_threshold, selected_classes):
 
                 # Display the frame in Streamlit
                 stframe.image(frame, channels="BGR")
+                
+                # Display detection messages
+                with message_container.container():
+                    display_detection_messages(detected_classes)
 
             except Exception as e:
                 st.error(f"Error during model prediction: {str(e)}")
@@ -118,11 +184,16 @@ def live_streaming(conf_threshold, selected_classes):
 
 def video_streaming(uploaded_file, conf_threshold, selected_classes):
     stframe = st.empty()
+    message_container = st.empty()
+    
     with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
         tmp_file.write(uploaded_file.read())
         video_path = tmp_file.name
 
     cap = cv2.VideoCapture(video_path)
+    
+    # Keep track of all detected classes throughout the video
+    all_detected_classes = set()
 
     while cap.isOpened() and st.session_state.is_detecting:
         ret, frame = cap.read()
@@ -136,6 +207,7 @@ def video_streaming(uploaded_file, conf_threshold, selected_classes):
         confs = detections.boxes.conf.cpu().numpy()
         class_ids = detections.boxes.cls.cpu().numpy().astype(int)
 
+        detected_classes = []
         if selected_classes:
             filtered = [
                 (box, conf, class_id)
@@ -144,8 +216,14 @@ def video_streaming(uploaded_file, conf_threshold, selected_classes):
             ]
             if filtered:
                 boxes, confs, class_ids = zip(*filtered)
+                detected_classes = [yolo_classes[class_id] for class_id in class_ids]
             else:
                 boxes, confs, class_ids = [], [], []
+        else:
+            detected_classes = [yolo_classes[class_id] for class_id in class_ids]
+
+        # Add to cumulative detected classes
+        all_detected_classes.update(detected_classes)
 
         for i, box in enumerate(boxes):
             x1, y1, x2, y2 = map(int, box)
@@ -162,6 +240,10 @@ def video_streaming(uploaded_file, conf_threshold, selected_classes):
             )
 
         stframe.image(frame, channels="BGR")
+        
+        # Display current detection messages
+        with message_container.container():
+            display_detection_messages(list(all_detected_classes))
 
     cap.release()
     cv2.destroyAllWindows()
@@ -179,6 +261,7 @@ def image_detection(uploaded_file, conf_threshold, selected_classes):
     confs = detections.boxes.conf.cpu().numpy()
     class_ids = detections.boxes.cls.cpu().numpy().astype(int)
 
+    detected_classes = []
     if selected_classes:
         filtered = [
             (box, conf, class_id)
@@ -187,8 +270,11 @@ def image_detection(uploaded_file, conf_threshold, selected_classes):
         ]
         if filtered:
             boxes, confs, class_ids = zip(*filtered)
+            detected_classes = [yolo_classes[class_id] for class_id in class_ids]
         else:
             boxes, confs, class_ids = [], [], []
+    else:
+        detected_classes = [yolo_classes[class_id] for class_id in class_ids]
 
     for i, box in enumerate(boxes):
         x1, y1, x2, y2 = map(int, box)
@@ -204,13 +290,18 @@ def image_detection(uploaded_file, conf_threshold, selected_classes):
             2,
         )
 
-    st.image(image_cv, channels="BGR")
+    # Display the image and detection messages
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.image(image_cv, channels="BGR")
+    with col2:
+        display_detection_messages(detected_classes)
 
 
 # Sidebar controls for user input
 with st.sidebar:
     st.title("Object Detection Settings " + "⚙️")
-    confidence_threshold = st.slider("Confidence Threshold",0.0,1.0,0.2)
+    confidence_threshold = st.slider("Confidence Threshold", 0.0, 1.0, 0.2)
     selected_classes = st.multiselect(
         "Select classes for object detection", yolo_classes
     )
@@ -242,6 +333,31 @@ with st.sidebar:
     if detect_button:
         st.session_state.is_detecting = not st.session_state.is_detecting
 
+    # Add a legend section
+    st.markdown("---")
+    st.subheader("📋 Disposal Guide")
+    with st.expander("View all disposal instructions"):
+        # Group by color categories
+        st.markdown("### 🟥 **Hazardous Bin**")
+        st.error("⚡ **Battery:** Dispose in the **HAZARDOUS** bin.")
+        
+        st.markdown("### 🟢 **Organic Bin**")
+        st.success("🍃 **Biological:** Dispose in the **ORGANIC** bin.")
+        
+        st.markdown("### 🟡 **Recyclables**")
+        st.warning("📦 **Cardboard:** Flatten and dispose in the **RECYCLING** bin.")
+        st.warning("🍶 **Glass:** Dispose in the **RECYCLING** bin.")
+        st.warning("🔩 **Metal:** Dispose in the **RECYCLING** bin.")
+        st.warning("📄 **Paper:** Dispose in the **RECYCLING** bin.")
+        st.warning("♻️ **Plastic:** Dispose in the **RECYCLING** bin.")
+        
+        st.markdown("### 🟦 **Donate**")
+        st.info("👕 **Clothes:** Consider **Donating** or dispose in the **GENERAL** bin.")
+        st.info("👟 **Shoes:** Consider **Donating** or dispose in the **GENERAL** bin.")
+        
+        st.markdown("### ⬛ **General Waste**")
+        st.error("🗑️ **Trash:** Dispose in the **GENERAL** bin.")
+
 # Handle object detection based on user input
 if st.session_state.is_detecting:
     if st.session_state.is_webcam_active:
@@ -256,41 +372,33 @@ if st.session_state.is_detecting:
             st.info("Detecting objects in image...")
             image_detection(uploaded_file, confidence_threshold, selected_classes)
 else:
-    st.title("Object Detection")
+    st.title("Smart Garbage Detection & Sorting Assistant")
     st.info("Upload an image or video, or start the webcam for object detection.")
 
-    st.write(
-        """
-        ### What is YOLO?
-        YOLO (You Only Look Once) is a state-of-the-art, real-time object detection system that excels in speed and accuracy. It processes images in a single pass, making it highly efficient for applications requiring rapid object detection.
-
-        ### How YOLO Works
-        YOLO divides the input image into a grid and predicts bounding boxes and class probabilities for each grid cell. This allows it to identify multiple objects simultaneously, making it suitable for real-time scenarios.
-
-        ### Training YOLO
-        To train a YOLO model on your own dataset, follow these key steps:
-
-        1. **Dataset Preparation**:
-            - Collect and annotate your images with bounding box coordinates and class labels. You can use annotation tools like LabelImg or Roboflow.
-
-        2. **Environment Setup**:
-            - Install the necessary libraries and dependencies as specified in the Ultralytics repository. This typically involves using Python and libraries like PyTorch.
-
-        3. **Model Configuration**:
-            - Choose a model architecture (e.g., YOLOv5) and configure it based on your dataset’s requirements. This includes setting the number of classes and adjusting the input image size.
-
-        4. **Training**:
-            - Use the command line interface to start the training process. The typical command looks like this:
-              ```bash
-              python train.py --img 640 --batch 16 --epochs 50 --data your_dataset.yaml --weights yolov10s.pt
-              ```
-            - Here, you specify parameters like image size, batch size, number of epochs, dataset configuration, and pre-trained weights.
-
-        5. **Evaluation**:
-            - After training, evaluate the model's performance using validation data. This step helps in understanding the accuracy and making necessary adjustments.
-
-        For detailed instructions, examples, and best practices, please refer to the [Ultralytics YOLO Training Documentation](https://docs.ultralytics.com/models/yolov10/train/).
-
-        Now, go ahead and upload your image or video, or start the webcam to see YOLO in action!
-    """
-    )
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write(
+            """
+            ### 🗂️ Garbage Detection Using YOLO
+            This is a group project by **Num Chakhatanon** and **Dawis Meedech** to help people sort garbage more easily.
+            
+            **Features:**
+            - Real-time object detection via webcam
+            - Image and video analysis
+            - Smart disposal recommendations
+            - Multiple waste categories supported
+            """
+        )
+    
+    with col2:
+        st.write(
+            """
+            ### 📖 How to Use:
+            1. **Upload** an image/video or use your **webcam**
+            2. **Adjust** confidence threshold as needed
+            3. **Select** specific classes to detect (optional)
+            4. **Start detection** and follow the disposal instructions
+            
+            The system will automatically provide disposal guidance for detected items!
+            """
+        )
