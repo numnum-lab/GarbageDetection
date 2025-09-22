@@ -18,17 +18,12 @@ sys.path.append(dir.parent.parent)
 # Load YOLO model with error handling
 if "yolo_model" not in st.session_state:
     try:
-        # ใช้ Path ที่ถูกต้องสำหรับโครงสร้างโฟลเดอร์ของคุณ
-        # จากข้อมูลก่อนหน้า อาจต้องใช้โค้ดนี้
-        script_dir = Path(__file__).resolve().parent
-        model_path = script_dir.parent / "models" / "my_model.pt"
-
-        st.session_state.yolo_model = YOLO(model_path) 
+        # โหลดโมเดลโดยใช้ชื่อไฟล์โดยตรง
+        st.session_state.yolo_model = YOLO("my_model.pt") 
         st.success("YOLO Model loaded successfully!")
     except Exception as e:
         st.error(f"Error loading YOLO model: {e}")
-        st.warning("Please check your model file path and file integrity on GitHub.")
-        st.stop() # หยุดการทำงานของแอปเมื่อเกิดข้อผิดพลาด
+        st.stop()
 
 
 yolo_classes = [
