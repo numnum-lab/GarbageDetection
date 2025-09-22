@@ -16,7 +16,16 @@ sys.path.append(dir.parent.parent)
 # Load YOLO model with error handling
 if "yolo_model" not in st.session_state:
     try:
-        st.session_state.yolo_model = YOLO(model_path)
+        # Get the absolute path to the directory containing the current script
+        script_dir = Path(__file__).resolve().parent
+
+        # Define the relative path to the models folder
+        # Note: Based on your file structure, you might need to go up two directories
+        # before entering the models folder, or you can adjust your file path to go up only one
+        model_dir = script_dir.parent / "models"
+        model_path = model_dir / "my_model.pt"
+
+        st.session_state.yolo_model = YOLO(model_path) 
         st.success("YOLO Model loaded successfully!")
     except Exception as e:
         st.error(f"Error loading YOLO model: {e}")
