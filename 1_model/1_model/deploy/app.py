@@ -5,11 +5,10 @@ import tempfile
 from PIL import Image
 import numpy as np
 
-
 # Load YOLO model
-
-model = YOLO("models/my_model.pt")
+model = YOLO("yolov8n.pt")
 # YOLO class names
+
 yolo_classes = [
     "battery",
     "biological",
