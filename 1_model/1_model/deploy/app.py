@@ -16,7 +16,7 @@ sys.path.append(dir.parent.parent)
 # Load YOLO model with error handling
 if "yolo_model" not in st.session_state:
     try:
-        st.session_state.yolo_model = YOLO("models/my_model.pt") 
+        st.session_state.yolo_model = YOLO("../models/my_model.pt")
         st.success("YOLO Model loaded successfully!")
     except Exception as e:
         st.error(f"Error loading YOLO model: {e}")
