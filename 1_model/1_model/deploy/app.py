@@ -19,7 +19,21 @@ st.set_page_config(
     initial_sidebar_state="expanded",
     page_title="Object Detection",
 )
+@st.cache_resource
+def load_yolo_model():
+    try:
+        script_dir = Path(__file__).resolve().parent
+        model_path = script_dir / "my_model.pt"
+        with torch.serialization.safe_globals([DetectionModel]):
+            model = YOLO(str(model_path))
+        return model
+    except Exception as e:
+        st.error(f"Error loading YOLO model: {e}")
+        return None
 
+# ตรวจสอบและโหลดโมเดลแค่ครั้งเดียว
+if "yolo_model" not in st.session_state:
+    st.session_state.yolo_model = load_yolo_model()
 # Debug: Show current working directory and file structure
 if "yolo_model" not in st.session_state:
     try:
@@ -143,6 +157,10 @@ class YOLOProcessor(VideoProcessorBase):
 
 def image_detection(uploaded_file, conf_threshold, selected_classes):
     """Process uploaded image"""
+    if not st.session_state.yolo_model: # ✅ ตรวจสอบว่าโมเดลไม่เป็น None
+        st.error("YOLO model is not loaded. Cannot perform image detection.")
+        return
+
     image = Image.open(uploaded_file)
     image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
     
@@ -239,22 +257,19 @@ if st.session_state.is_detecting:
         st.info("Detecting objects using webcam...")
         
         # Check if model is loaded before using WebRTC
-        # ... (โค้ดส่วนอื่นๆ)
-        if "yolo_model" in st.session_state:
-                 webrtc_streamer(
+        if st.session_state.yolo_model: # ✅ ตรวจสอบว่าโมเดลไม่เป็น None
+            webrtc_streamer(
                 key="yolo-stream",
-                    # ใช้ lambda เพื่อส่งค่าจาก session state ไปยัง processor
-                 video_processor_factory=lambda: YOLOProcessor(
-                st.session_state.yolo_model, 
-                st.session_state.confidence_threshold
+                video_processor_factory=lambda: YOLOProcessor(
+                    st.session_state.yolo_model, 
+                    st.session_state.confidence_threshold
                 ),
-             rtc_configuration=ClientSettings(
-                rtc_offer_min_port=10000,
-                rtc_offer_max_port=10200,
-        ),
-    )
-
-        if "detected_classes" in st.session_state:
+                rtc_configuration=ClientSettings(
+                    rtc_offer_min_port=10000,
+                    rtc_offer_max_port=10200,
+                ),
+            )
+            if "detected_classes" in st.session_state:
                 display_detection_messages(st.session_state.detected_classes)
         else:
             st.error("YOLO model is not loaded. Please check the logs for errors.")
