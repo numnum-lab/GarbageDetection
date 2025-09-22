@@ -4,6 +4,4 @@ streamlit-webrtc
 opencv-python
 av
 huggingface_hub
-aiortc
-pyee
 torch>=1.8.0
