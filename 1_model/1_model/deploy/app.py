@@ -12,57 +12,17 @@ import os
 import torch
 from ultralytics.nn.tasks import DetectionModel
 from functools import partial
+from huggingface_hub import hf_hub_download
 
-# Set page config first
+# กำหนดค่าเริ่มต้นของหน้าเว็บ
 st.set_page_config(
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
     page_title="Object Detection",
 )
-@st.cache_resource
-def load_yolo_model():
-    try:
-        st.info("กำลังดาวน์โหลดและโหลดโมเดลจาก Hugging Face...")
-        
-        # ✅ ใส่ชื่อ repo_id ของคุณ
-        repo_id = "Numgfsdf/garbage-detection-model" 
-        # ✅ ใส่ชื่อไฟล์โมเดลของคุณ
-        filename = "my_model.pt"
 
-        # ดาวน์โหลดไฟล์โมเดล
-        model_path = hf_hub_download(repo_id=repo_id, filename=filename)
-        
-        with torch.serialization.safe_globals([DetectionModel]):
-            model = YOLO(model_path)
-            
-        st.success(f"โหลด YOLO Model สำเร็จจาก {model_path}!")
-        return model
-        
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการดาวน์โหลดหรือโหลด YOLO model: {e}")
-        return None
-# Debug: Show current working directory and file structure
-if "yolo_model" not in st.session_state:
-    try:
-        # Get the directory where the script is located
-        script_dir = Path(__file__).resolve().parent
-        model_path = script_dir / "my_model.pt"
-
-        # Add the trusted class to PyTorch's allowed globals
-        with torch.serialization.safe_globals([DetectionModel]):
-            st.session_state.yolo_model = YOLO(str(model_path))
-        
-        st.success(f"YOLO Model loaded successfully!")
-    except Exception as e:
-        st.error(f"Error loading YOLO model: {e}")
-        st.stop()
-
-# Set up the correct path for imports
-current_dir = Path(__file__).resolve().parent
-sys.path.append(str(current_dir.parent.parent))
-
-# YOLO classes and messages
+# คลาสของ YOLO และข้อความสำหรับจัดการขยะ
 yolo_classes = [
     "battery", "biological", "cardboard", "clothes", "glass", 
     "metal", "paper", "plastic", "shoes", "trash"
@@ -81,31 +41,76 @@ disposal_messages = {
     "trash": "🗑️ **General trash detected!** Dispose in the **GENERAL** bin.",
 }
 
-# Initialize session state
-if "is_detecting" not in st.session_state:
-    st.session_state.is_detecting = False
-if "is_webcam_active" not in st.session_state:
-    st.session_state.is_webcam_active = False
-if "confidence_threshold" not in st.session_state:
-    st.session_state.confidence_threshold = 0.2
+# ---
+### **การโหลดโมเดล (ส่วนที่แก้ไข)**
 
-# Load YOLO model using the correct path
-if "yolo_model" not in st.session_state:
+# ฟังก์ชันสำหรับโหลดโมเดลจาก Hugging Face Hub และใช้ cache
+@st.cache_resource
+def load_yolo_model():
     try:
-        # Get the directory where the script is located
-        script_dir = Path(__file__).resolve().parent
-        model_path = script_dir / "my_model.pt"
+        st.info("กำลังดาวน์โหลดและโหลดโมเดลจาก Hugging Face...")
         
-        st.info(f"Trying to load model from: {model_path}")
-        st.session_state.yolo_model = YOLO(str(model_path))
-        st.success(f"YOLO Model loaded successfully from: {model_path}")
+        # ✅ แก้ไข: ใส่ชื่อ repo_id และ filename ของคุณที่ถูกต้อง
+        repo_id = "Numgfsdf/garbage-detection-model"
+        filename = "my_model.pt"
+
+        # ดาวน์โหลดไฟล์โมเดลจาก Hugging Face
+        model_path = hf_hub_download(repo_id=repo_id, filename=filename)
+        
+        # โหลดโมเดล
+        with torch.serialization.safe_globals([DetectionModel]):
+            model = YOLO(model_path)
+            
+        st.success(f"โหลด YOLO Model สำเร็จจาก {model_path}!")
+        return model
+        
     except Exception as e:
-        st.error(f"Error loading YOLO model: {e}")
-        st.error(f"Attempted path: {script_dir / 'my_model.pt'}")
-        st.stop()
+        st.error(f"เกิดข้อผิดพลาดในการดาวน์โหลดหรือโหลด YOLO model: {e}")
+        st.error("กรุณาตรวจสอบชื่อ repo_id และไฟล์โมเดลใน Hugging Face")
+        return None
+
+# ตรวจสอบและโหลดโมเดลแค่ครั้งเดียว
+if "yolo_model" not in st.session_state:
+    st.session_state.yolo_model = load_yolo_model()
+
+# ---
+### **ฟังก์ชันประมวลผลวิดีโอ (ไม่เปลี่ยนแปลง)**
+
+# คลาสสำหรับประมวลผลวิดีโอจากเว็บแคม
+class YOLOProcessor(VideoProcessorBase):
+    def __init__(self, yolo_model, conf_threshold):
+        self.model = yolo_model
+        self.conf_threshold = conf_threshold
+        
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        
+        results = self.model.predict(source=img, conf=self.conf_threshold)
+        detections = results[0]
+        
+        boxes = (detections.boxes.xyxy.cpu().numpy() if len(detections) > 0 else [])
+        confs = (detections.boxes.conf.cpu().numpy() if len(detections) > 0 else [])
+        class_ids = (detections.boxes.cls.cpu().numpy().astype(int) if len(detections) > 0 else [])
+        
+        detected_classes = [yolo_classes[int(cls_id)] for cls_id in class_ids]
+        
+        if detected_classes:
+            st.session_state['detected_classes'] = detected_classes
+        else:
+            st.session_state['detected_classes'] = []
+            
+        for i, box in enumerate(boxes):
+            x1, y1, x2, y2 = map(int, box)
+            label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
+            cv2.rectangle(img, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
+            cv2.putText(img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+# ---
+### **ฟังก์ชันแสดงผล (ไม่เปลี่ยนแปลง)**
 
 def display_detection_messages(detected_classes):
-    """Display disposal messages for detected objects with color coding"""
     if detected_classes:
         st.subheader("🎯 Detection Results:")
         unique_classes = list(set(detected_classes))
@@ -129,43 +134,8 @@ def display_detection_messages(detected_classes):
                 else:
                     st.error(f"⬛ {disposal_messages[class_name]}")
 
-class YOLOProcessor(VideoProcessorBase):
-    def __init__(self, yolo_model, conf_threshold):
-        self.model = yolo_model
-        self.conf_threshold = conf_threshold
-        
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        
-        results = self.model.predict(source=img, conf=self.conf_threshold)
-        detections = results[0]
-        
-        boxes = (detections.boxes.xyxy.cpu().numpy() if len(detections) > 0 else [])
-        confs = (detections.boxes.conf.cpu().numpy() if len(detections) > 0 else [])
-        class_ids = (detections.boxes.cls.cpu().numpy().astype(int) if len(detections) > 0 else [])
-        
-        detected_classes = [yolo_classes[int(cls_id)] for cls_id in class_ids]
-        
-       # ✅ แก้ไข: อัปเดต st.session_state แทนการ return
-        if detected_classes:
-            st.session_state['detected_classes'] = detected_classes
-        else:
-            st.session_state['detected_classes'] = []
-            
-        # Draw bounding boxes and labels
-        for i, box in enumerate(boxes):
-            x1, y1, x2, y2 = map(int, box)
-            label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
-            cv2.rectangle(img, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
-            cv2.putText(img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-            
-        # ✅ แก้ไข: return แค่ VideoFrame
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-
 def image_detection(uploaded_file, conf_threshold, selected_classes):
-    """Process uploaded image"""
-    if not st.session_state.yolo_model: # ✅ ตรวจสอบว่าโมเดลไม่เป็น None
+    if not st.session_state.yolo_model:
         st.error("YOLO model is not loaded. Cannot perform image detection.")
         return
 
@@ -194,7 +164,6 @@ def image_detection(uploaded_file, conf_threshold, selected_classes):
     else:
         detected_classes = [yolo_classes[class_id] for class_id in class_ids]
     
-    # Draw bounding boxes
     for i, box in enumerate(boxes):
         x1, y1, x2, y2 = map(int, box)
         label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
@@ -206,6 +175,9 @@ def image_detection(uploaded_file, conf_threshold, selected_classes):
         st.image(image_cv, channels="BGR")
     with col2:
         display_detection_messages(detected_classes)
+
+# ---
+### **Main App Logic**
 
 # Sidebar controls
 with st.sidebar:
@@ -241,21 +213,17 @@ with st.sidebar:
     with st.expander("View all disposal instructions"):
         st.markdown("### 🟥 **Hazardous Bin**")
         st.error("⚡ **Battery:** Dispose in the **HAZARDOUS** bin.")
-        
         st.markdown("### 🟢 **Organic Bin**")
         st.success("🍃 **Biological:** Dispose in the **ORGANIC** bin.")
-        
         st.markdown("### 🟡 **Recyclables**")
         st.warning("📦 **Cardboard:** Flatten and dispose in the **RECYCLING** bin.")
         st.warning("🍶 **Glass:** Dispose in the **RECYCLING** bin.")
         st.warning("🔩 **Metal:** Dispose in the **RECYCLING** bin.")
         st.warning("📄 **Paper:** Dispose in the **RECYCLING** bin.")
         st.warning("♻️ **Plastic:** Dispose in the **RECYCLING** bin.")
-        
         st.markdown("### 🟦 **Donate**")
         st.info("👕 **Clothes:** Consider **Donating** or dispose in the **GENERAL** bin.")
         st.info("👟 **Shoes:** Consider **Donating** or dispose in the **GENERAL** bin.")
-        
         st.markdown("### ⬛ **General Waste**")
         st.error("🗑️ **Trash:** Dispose in the **GENERAL** bin.")
 
@@ -264,11 +232,13 @@ if st.session_state.is_detecting:
     if st.session_state.is_webcam_active:
         st.info("Detecting objects using webcam...")
         if "yolo_model" in st.session_state and st.session_state.yolo_model:
+            # ✅ แก้ไข: ใช้ functools.partial เพื่อแก้ปัญหาความไม่เข้ากันของไลบรารี
             processor_factory = partial(
                 YOLOProcessor,
                 yolo_model=st.session_state.yolo_model,
                 conf_threshold=st.session_state.confidence_threshold
             )
+            
             webrtc_streamer(
                 key="yolo-stream",
                 video_processor_factory=processor_factory,
