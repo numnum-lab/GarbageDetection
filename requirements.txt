@@ -1,7 +1,6 @@
 streamlit
-ultralytics==8.3.202
+ultralytics
 streamlit-webrtc
 opencv-python
 av
 huggingface_hub
-torch>=1.8.0
