@@ -19,9 +19,12 @@ st.set_page_config(
 )
 
 # Debug: Show current working directory and file structure
-if st.checkbox("Show Debug Info", value=False):
+if st.checkbox("Show Debug Info", value=True):  # Changed to True for debugging
     st.write("Current working directory:", os.getcwd())
     st.write("Files in current directory:", os.listdir("."))
+    current_script_dir = Path(__file__).resolve().parent
+    st.write("Script directory:", str(current_script_dir))
+    st.write("Files in script directory:", os.listdir(str(current_script_dir)))
     try:
         st.write("Files in parent directory:", os.listdir(".."))
     except:
