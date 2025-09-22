@@ -13,7 +13,17 @@ import torch
 from ultralytics.nn.tasks import DetectionModel
 from functools import partial
 from huggingface_hub import hf_hub_download
+if "is_webcam_active" not in st.session_state:
+    st.session_state.is_webcam_active = False
 
+if "is_detecting" not in st.session_state:
+    st.session_state.is_detecting = False
+
+if "detected_classes" not in st.session_state:
+    st.session_state.detected_classes = []
+
+if "confidence_threshold" not in st.session_state:
+    st.session_state.confidence_threshold = 0.2
 # กำหนดค่าเริ่มต้นของหน้าเว็บ
 st.set_page_config(
     page_icon="🔍",
