@@ -1,8 +1,3 @@
-ขอโทษครับที่ทำให้สับสน ผมจะแก้ไขโค้ดให้คุณทันทีครับ
-
-นี่คือโค้ด `app.py` ที่ถูกแก้ไขอย่างสมบูรณ์แล้ว:
-
-```python
 import cv2
 import streamlit as st
 from ultralytics import YOLO
