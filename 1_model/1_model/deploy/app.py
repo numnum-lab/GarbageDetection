@@ -14,11 +14,13 @@ dir = Path(__file__).resolve()
 sys.path.append(dir.parent.parent)
 
 # Load YOLO model with error handling
-try:
-    yolo_model = YOLO("models/my_model.pt") 
-    print("YOLO Model loaded successfully!")
-except Exception as e:
-    print(f"Error loading YOLO model: {e}")
+if "yolo_model" not in st.session_state:
+    try:
+        st.session_state.yolo_model = YOLO("models/my_model.pt") 
+        st.success("YOLO Model loaded successfully!")
+    except Exception as e:
+        st.error(f"Error loading YOLO model: {e}")
+        st.stop()
 
 yolo_classes = [
     "battery", "biological", "cardboard", "clothes", "glass", "metal", "paper", "plastic", "shoes", "trash",
@@ -177,7 +179,7 @@ if st.session_state.is_detecting:
                 rtc_offer_min_port=10000,
                 rtc_offer_max_port=10000 + 200,
             ),
-            args=(yolo_model,),
+            args=(st.session_state.yolo_model,),
         )
     elif uploaded_file:
         file_extension = uploaded_file.name.split(".")[-1].lower()
