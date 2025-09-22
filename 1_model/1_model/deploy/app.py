@@ -4,27 +4,23 @@ from ultralytics import YOLO
 import tempfile
 from PIL import Image
 import numpy as np
-from utils import wrangle
-import pickle
 import sys
-from pathlib import Path
+from pathlib import Path# ✅ เพิ่มบรรทัดนี้เข้ามา
 
+# Set up the correct path for imports
 dir = Path(__file__).resolve()
 sys.path.append(dir.parent.parent)
 
-# load model
-path_to_model = './models/my_model.pkl'
-
+# Load YOLO model with error handling
 try:
-    with open(path_to_model, 'rb') as file:
-        sklearn_model = pickle.load(file)  # ✅ เก็บใน sklearn_model
-    print("โหลดโมเดล ML สำเร็จ!")
-except FileNotFoundError:
-    print("ไม่พบไฟล์โมเดล .pkl")
-# Load YOLO model
-yolo_model = YOLO("1_model/1_model/deploy/models/my_model.pt")
-# YOLO class names
-print("โหลด YOLO Model สำเร็จ!")
+    # Use a clearer relative path to the model file
+    yolo_model = YOLO("models/my_model.pt") 
+    print("YOLO Model loaded successfully!")
+
+except Exception as e:
+    # Catch any error during the model loading process
+    print(f"Error loading YOLO model: {e}")
+
 
 yolo_classes = [
     "battery",
