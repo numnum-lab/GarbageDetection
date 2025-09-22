@@ -240,7 +240,7 @@ if st.session_state.is_detecting:
                     rtc_offer_min_port=10000,
                     rtc_offer_max_port=10200,
                 ),
-                args=(st.session_state.yolo_model,),
+                args=(st.session_state.yolo_model, st.session_state.confidence_threshold,),
             )
         else:
             st.error("YOLO model is not loaded. Please check the logs for errors.")
