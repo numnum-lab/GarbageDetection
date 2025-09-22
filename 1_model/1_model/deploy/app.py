@@ -107,23 +107,22 @@ def display_detection_messages(detected_classes):
                 else:
                     st.error(f"⬛ {disposal_messages[class_name]}")
 
-# WebRTC Video Processor
 class YOLOProcessor(VideoProcessorBase):
-    def __init__(self, yolo_model, conf_threshold): # ✅ รับ conf_threshold เข้ามา
+    def __init__(self, yolo_model, conf_threshold):
         self.model = yolo_model
-        self.conf_threshold = conf_threshold # ✅ เก็บค่าไว้ใน instance
-
+        self.conf_threshold = conf_threshold
+        
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
-
-        # Perform object detection
-        # ✅ ใช้ค่า conf_threshold ที่ถูกส่งเข้ามาแทน
+        
         results = self.model.predict(source=img, conf=self.conf_threshold)
         detections = results[0]
-
+        
         boxes = (detections.boxes.xyxy.cpu().numpy() if len(detections) > 0 else [])
         confs = (detections.boxes.conf.cpu().numpy() if len(detections) > 0 else [])
         class_ids = (detections.boxes.cls.cpu().numpy().astype(int) if len(detections) > 0 else [])
+        
+        detected_classes = [yolo_classes[int(cls_id)] for cls_id in class_ids]
         
         # Draw bounding boxes and labels
         for i, box in enumerate(boxes):
@@ -131,8 +130,9 @@ class YOLOProcessor(VideoProcessorBase):
             label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
             cv2.rectangle(img, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
             cv2.putText(img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-        
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
+            
+        # Return the processed frame AND the list of detected classes
+        return av.VideoFrame.from_ndarray(img, format="bgr24"), detected_classes
 
 def image_detection(uploaded_file, conf_threshold, selected_classes):
     """Process uploaded image"""
