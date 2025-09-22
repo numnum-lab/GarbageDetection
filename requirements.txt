@@ -6,8 +6,8 @@ numpy==1.26.4
 pandas==2.2.2
 scikit-learn==1.5.1
 torch>=1.8.0
-streamlit-webrtc>=0.45.0  
+streamlit-webrtc==0.45.0
 huggingface_hub
 aiortc
 pyee
-av  
+av==10.0.0 
