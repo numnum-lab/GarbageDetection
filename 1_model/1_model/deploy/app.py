@@ -61,35 +61,19 @@ if "is_webcam_active" not in st.session_state:
 if "confidence_threshold" not in st.session_state:
     st.session_state.confidence_threshold = 0.2
 
-# Load YOLO model with multiple fallback paths
+# Load YOLO model using the correct path
 if "yolo_model" not in st.session_state:
-    model_loaded = False
-    
-    # Try different possible paths based on the actual structure
-    possible_paths = [
-        "my_model.pt",  # Same directory as app.py
-        "../models/my_model.pt",  # Parent directory models folder
-        "../../models/my_model.pt",  # Two levels up
-        "models/my_model.pt",  # Models subfolder
-        "1_model/1_model/models/my_model.pt",  # From root directory
-        "1_model/models/my_model.pt",  # Alternative structure
-        "/mount/src/garbagedetection/1_model/1_model/models/my_model.pt",  # Absolute path
-    ]
-    
-    for model_path in possible_paths:
-        try:
-            st.session_state.yolo_model = YOLO(model_path)
-            st.success(f"YOLO Model loaded successfully from: {model_path}")
-            model_loaded = True
-            break
-        except Exception as e:
-            continue
-    
-    if not model_loaded:
-        st.error("Could not load YOLO model from any of the expected paths.")
-        st.warning("Please ensure my_model.pt is in one of these locations:")
-        for path in possible_paths:
-            st.text(f"- {path}")
+    try:
+        # Get the directory where the script is located
+        script_dir = Path(__file__).resolve().parent
+        model_path = script_dir / "my_model.pt"
+        
+        st.info(f"Trying to load model from: {model_path}")
+        st.session_state.yolo_model = YOLO(str(model_path))
+        st.success(f"YOLO Model loaded successfully from: {model_path}")
+    except Exception as e:
+        st.error(f"Error loading YOLO model: {e}")
+        st.error(f"Attempted path: {script_dir / 'my_model.pt'}")
         st.stop()
 
 def display_detection_messages(detected_classes):
