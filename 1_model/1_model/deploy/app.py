@@ -11,7 +11,6 @@ import av
 import os
 import torch
 from ultralytics.nn.tasks import DetectionModel
-# ✅ Import functools เพื่อใช้ partial
 from functools import partial
 
 # Set page config first
@@ -254,13 +253,15 @@ with st.sidebar:
         st.error("🗑️ **Trash:** Dispose in the **GENERAL** bin.")
 
 # Main app logic
+# Main app logic
 if st.session_state.is_detecting:
     if st.session_state.is_webcam_active:
         st.info("Detecting objects using webcam...")
         
         # Check if model is loaded before using WebRTC
         if "yolo_model" in st.session_state and st.session_state.yolo_model:
-            # ✅ แก้ไขตรงนี้: ใช้ functools.partial เพื่อแก้ปัญหาอย่างถาวร
+            # ✅ CORRECT FIX: Use functools.partial to create a factory function
+            # that pre-loads the necessary arguments.
             processor_factory = partial(
                 YOLOProcessor,
                 yolo_model=st.session_state.yolo_model,
@@ -269,7 +270,7 @@ if st.session_state.is_detecting:
             
             webrtc_streamer(
                 key="yolo-stream",
-                video_processor_factory=processor_factory,
+                video_processor_factory=processor_factory, # ✅ ใช้ factory
                 rtc_configuration=ClientSettings(
                     rtc_offer_min_port=10000,
                     rtc_offer_max_port=10200,
