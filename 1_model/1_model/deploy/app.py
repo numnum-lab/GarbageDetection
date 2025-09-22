@@ -251,31 +251,25 @@ with st.sidebar:
         st.markdown("### ⬛ **General Waste**")
         st.error("🗑️ **Trash:** Dispose in the **GENERAL** bin.")
 
-# ส่วน Logic หลักของแอป
+# Main app logic
 if st.session_state.is_detecting:
     if st.session_state.is_webcam_active:
         st.info("Detecting objects using webcam...")
         
-        # ตรวจสอบว่าโมเดลโหลดสมบูรณ์
+        # Check if model is loaded before using WebRTC
         if "yolo_model" in st.session_state and st.session_state.yolo_model:
-            
-            # ✅ แก้ไข: สร้างอินสแตนซ์ของ processor ในเธรดหลัก
-            # ตรงนี้ st.session_state ยังใช้งานได้
-            video_processor = YOLOProcessor(
-                yolo_model=st.session_state.yolo_model, 
-                conf_threshold=st.session_state.confidence_threshold
-            )
-            
-            # ✅ แก้ไข: ส่งอินสแตนซ์ที่สร้างแล้วเข้าไปใน webrtc_streamer โดยใช้ video_processor
             webrtc_streamer(
                 key="yolo-stream",
-                video_processor=video_processor,  # ส่งอินสแตนซ์โดยตรง
+                # ✅ ใช้ video_processor_factory อีกครั้ง แต่ส่งค่าด้วย lambda ที่ถูกต้อง
+                video_processor_factory=lambda: YOLOProcessor(
+                    yolo_model=st.session_state.yolo_model, 
+                    conf_threshold=st.session_state.confidence_threshold
+                ),
                 rtc_configuration=ClientSettings(
                     rtc_offer_min_port=10000,
                     rtc_offer_max_port=10200,
                 ),
             )
-            
             if "detected_classes" in st.session_state:
                 display_detection_messages(st.session_state.detected_classes)
         else:
