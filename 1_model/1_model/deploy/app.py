@@ -20,6 +20,18 @@ st.set_page_config(
     initial_sidebar_state="expanded",
     page_title="Object Detection",
 )
+if "is_webcam_active" not in st.session_state:
+    st.session_state.is_webcam_active = False
+
+if "is_detecting" not in st.session_state:
+    st.session_state.is_detecting = False
+
+if "detected_classes" not in st.session_state:
+    st.session_state.detected_classes = []
+
+if "confidence_threshold" not in st.session_state:
+    st.session_state.confidence_threshold = 0.2
+    
 @st.cache_resource
 def load_yolo_model():
     try:
