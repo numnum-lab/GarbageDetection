@@ -109,19 +109,18 @@ def display_detection_messages(detected_classes):
 
 # WebRTC Video Processor
 class YOLOProcessor(VideoProcessorBase):
-    def __init__(self, yolo_model):
+    def __init__(self, yolo_model, conf_threshold): # ✅ รับ conf_threshold เข้ามา
         self.model = yolo_model
-        
+        self.conf_threshold = conf_threshold # ✅ เก็บค่าไว้ใน instance
+
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
-        
-        # Get confidence threshold from session state
-        conf_threshold = st.session_state.get("confidence_threshold", 0.2)
-        
+
         # Perform object detection
-        results = self.model.predict(source=img, conf=conf_threshold)
+        # ✅ ใช้ค่า conf_threshold ที่ถูกส่งเข้ามาแทน
+        results = self.model.predict(source=img, conf=self.conf_threshold)
         detections = results[0]
-        
+
         boxes = (detections.boxes.xyxy.cpu().numpy() if len(detections) > 0 else [])
         confs = (detections.boxes.conf.cpu().numpy() if len(detections) > 0 else [])
         class_ids = (detections.boxes.cls.cpu().numpy().astype(int) if len(detections) > 0 else [])
