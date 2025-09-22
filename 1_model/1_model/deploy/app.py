@@ -7,9 +7,9 @@ import numpy as np
 from utils import wrangle
 import pickle
 import sys
-import path
+from pathlib import Path
 
-dir = path.Path(__file__).abspath()
+dir = Path(__file__).resolve()
 sys.path.append(dir.parent.parent)
 
 # load model
