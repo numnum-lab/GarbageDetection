@@ -253,24 +253,18 @@ with st.sidebar:
         st.error("🗑️ **Trash:** Dispose in the **GENERAL** bin.")
 
 # Main app logic
-# Main app logic
 if st.session_state.is_detecting:
     if st.session_state.is_webcam_active:
         st.info("Detecting objects using webcam...")
-        
-        # Check if model is loaded before using WebRTC
         if "yolo_model" in st.session_state and st.session_state.yolo_model:
-            # ✅ CORRECT FIX: Use functools.partial to create a factory function
-            # that pre-loads the necessary arguments.
             processor_factory = partial(
                 YOLOProcessor,
                 yolo_model=st.session_state.yolo_model,
                 conf_threshold=st.session_state.confidence_threshold
             )
-            
             webrtc_streamer(
                 key="yolo-stream",
-                video_processor_factory=processor_factory, # ✅ ใช้ factory
+                video_processor_factory=processor_factory,
                 rtc_configuration=ClientSettings(
                     rtc_offer_min_port=10000,
                     rtc_offer_max_port=10200,
