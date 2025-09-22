@@ -124,6 +124,12 @@ class YOLOProcessor(VideoProcessorBase):
         
         detected_classes = [yolo_classes[int(cls_id)] for cls_id in class_ids]
         
+       # ✅ แก้ไข: อัปเดต st.session_state แทนการ return
+        if detected_classes:
+            st.session_state['detected_classes'] = detected_classes
+        else:
+            st.session_state['detected_classes'] = []
+            
         # Draw bounding boxes and labels
         for i, box in enumerate(boxes):
             x1, y1, x2, y2 = map(int, box)
@@ -131,8 +137,9 @@ class YOLOProcessor(VideoProcessorBase):
             cv2.rectangle(img, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
             cv2.putText(img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
             
-        # Return the processed frame AND the list of detected classes
-        return av.VideoFrame.from_ndarray(img, format="bgr24"), detected_classes
+        # ✅ แก้ไข: return แค่ VideoFrame
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
+
 
 def image_detection(uploaded_file, conf_threshold, selected_classes):
     """Process uploaded image"""
@@ -241,7 +248,9 @@ if st.session_state.is_detecting:
                     rtc_offer_max_port=10200,
                 ),
                 args=(st.session_state.yolo_model, st.session_state.confidence_threshold,),
-            )
+             )
+            if "detected_classes" in st.session_state:
+                display_detection_messages(st.session_state.detected_classes)
         else:
             st.error("YOLO model is not loaded. Please check the logs for errors.")
             
