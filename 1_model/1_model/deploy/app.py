@@ -16,14 +16,19 @@ dir = Path(__file__).resolve()
 sys.path.append(dir.parent.parent)
 
 # Load YOLO model with error handling
-try:
-    # Use a clearer relative path to the model file
-    yolo_model = YOLO("models/my_model.pt") 
-    print("YOLO Model loaded successfully!")
+if "yolo_model" not in st.session_state:
+    try:
+        # ใช้ Path ที่ถูกต้องสำหรับโครงสร้างโฟลเดอร์ของคุณ
+        # จากข้อมูลก่อนหน้า อาจต้องใช้โค้ดนี้
+        script_dir = Path(__file__).resolve().parent
+        model_path = script_dir.parent / "models" / "my_model.pt"
 
-except Exception as e:
-    # Catch any error during the model loading process
-    print(f"Error loading YOLO model: {e}")
+        st.session_state.yolo_model = YOLO(model_path) 
+        st.success("YOLO Model loaded successfully!")
+    except Exception as e:
+        st.error(f"Error loading YOLO model: {e}")
+        st.warning("Please check your model file path and file integrity on GitHub.")
+        st.stop() # หยุดการทำงานของแอปเมื่อเกิดข้อผิดพลาด
 
 
 yolo_classes = [
@@ -176,15 +181,20 @@ with st.sidebar:
 if st.session_state.is_detecting:
     if st.session_state.is_webcam_active:
         st.info("Detecting objects using webcam...")
-        webrtc_streamer(
-            key="yolo-stream",
-            video_processor_factory=YOLOProcessor,
-            rtc_configuration=ClientSettings(
-                rtc_offer_min_port=10000,
-                rtc_offer_max_port=10000 + 200,
-            ),
-            args=(st.session_state.yolo_model,),
-        )
+        
+        # ตรวจสอบว่าโมเดลถูกโหลดแล้วก่อนที่จะเรียกใช้ webrtc_streamer
+        if "yolo_model" in st.session_state:
+            webrtc_streamer(
+                key="yolo-stream",
+                video_processor_factory=YOLOProcessor,
+                rtc_configuration=ClientSettings(
+                    rtc_offer_min_port=10000,
+                    rtc_offer_max_port=10000 + 200,
+                ),
+                args=(st.session_state.yolo_model,),
+            )
+        else:
+            st.error("YOLO model is not loaded. Please check the logs for errors.")
     elif uploaded_file:
         file_extension = uploaded_file.name.split(".")[-1].lower()
         if file_extension in ["mp4", "mov", "avi", "m4v"]:
