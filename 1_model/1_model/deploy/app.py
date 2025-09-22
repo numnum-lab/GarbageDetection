@@ -8,28 +8,23 @@ import sys
 from pathlib import Path
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, ClientSettings
 import av
+import streamlit as st
+import os
 
 # Set up the correct path for imports
 dir = Path(__file__).resolve()
 sys.path.append(dir.parent.parent)
 
 # Load YOLO model with error handling
-if "yolo_model" not in st.session_state:
-    try:
-        # Get the absolute path to the directory containing the current script
-        script_dir = Path(__file__).resolve().parent
+try:
+    # Use a clearer relative path to the model file
+    yolo_model = YOLO("models/my_model.pt") 
+    print("YOLO Model loaded successfully!")
 
-        # Define the relative path to the models folder
-        # Note: Based on your file structure, you might need to go up two directories
-        # before entering the models folder, or you can adjust your file path to go up only one
-        model_dir = script_dir.parent / "models"
-        model_path = model_dir / "my_model.pt"
+except Exception as e:
+    # Catch any error during the model loading process
+    print(f"Error loading YOLO model: {e}")
 
-        st.session_state.yolo_model = YOLO(model_path) 
-        st.success("YOLO Model loaded successfully!")
-    except Exception as e:
-        st.error(f"Error loading YOLO model: {e}")
-        st.stop()
 
 yolo_classes = [
     "battery", "biological", "cardboard", "clothes", "glass", "metal", "paper", "plastic", "shoes", "trash",
