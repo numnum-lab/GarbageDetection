@@ -6,7 +6,7 @@ from PIL import Image
 import numpy as np
 
 # Load YOLO model
-model = YOLO("yolov8n.pt")
+model = YOLO("1_model/1_model/deploy/models/my_model.pt")
 # YOLO class names
 
 yolo_classes = [
