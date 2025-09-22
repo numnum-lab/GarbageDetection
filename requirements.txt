@@ -1,9 +1,9 @@
 streamlit
 ultralytics==8.3.202
-streamlit-webrtc==0.45.0
-opencv-python==4.8.0
-av==10.0.0
-huggingface_hub==0.16.4
+streamlit-webrtc
+opencv-python
+av
+huggingface_hub
 aiortc
 pyee
-torch==1.8.0
+torch>=1.8.0
