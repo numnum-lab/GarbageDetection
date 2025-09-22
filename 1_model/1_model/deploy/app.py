@@ -23,18 +23,25 @@ st.set_page_config(
 @st.cache_resource
 def load_yolo_model():
     try:
-        script_dir = Path(__file__).resolve().parent
-        model_path = script_dir / "my_model.pt"
-        with torch.serialization.safe_globals([DetectionModel]):
-            model = YOLO(str(model_path))
-        return model
-    except Exception as e:
-        st.error(f"Error loading YOLO model: {e}")
-        return None
+        st.info("กำลังดาวน์โหลดและโหลดโมเดลจาก Hugging Face...")
+        
+        # ✅ ใส่ชื่อ repo_id ของคุณ
+        repo_id = "Numgfsdf/garbage-detection-model" 
+        # ✅ ใส่ชื่อไฟล์โมเดลของคุณ
+        filename = "my_model.pt"
 
-# ตรวจสอบและโหลดโมเดลแค่ครั้งเดียว
-if "yolo_model" not in st.session_state:
-    st.session_state.yolo_model = load_yolo_model()
+        # ดาวน์โหลดไฟล์โมเดล
+        model_path = hf_hub_download(repo_id=repo_id, filename=filename)
+        
+        with torch.serialization.safe_globals([DetectionModel]):
+            model = YOLO(model_path)
+            
+        st.success(f"โหลด YOLO Model สำเร็จจาก {model_path}!")
+        return model
+        
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการดาวน์โหลดหรือโหลด YOLO model: {e}")
+        return None
 # Debug: Show current working directory and file structure
 if "yolo_model" not in st.session_state:
     try:
