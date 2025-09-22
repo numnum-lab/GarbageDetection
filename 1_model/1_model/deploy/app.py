@@ -10,6 +10,7 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, ClientSettings
 import av
 import os
 import torch
+from ultralytics.nn.tasks import DetectionModel 
 
 # Set page config first
 st.set_page_config(
