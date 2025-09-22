@@ -11,6 +11,8 @@ import av
 import os
 import torch
 from ultralytics.nn.tasks import DetectionModel
+# ✅ Import functools เพื่อใช้ partial
+from functools import partial
 
 # Set page config first
 st.set_page_config(
@@ -258,13 +260,16 @@ if st.session_state.is_detecting:
         
         # Check if model is loaded before using WebRTC
         if "yolo_model" in st.session_state and st.session_state.yolo_model:
+            # ✅ แก้ไขตรงนี้: ใช้ functools.partial เพื่อแก้ปัญหาอย่างถาวร
+            processor_factory = partial(
+                YOLOProcessor,
+                yolo_model=st.session_state.yolo_model,
+                conf_threshold=st.session_state.confidence_threshold
+            )
+            
             webrtc_streamer(
                 key="yolo-stream",
-                # ✅ ใช้ video_processor_factory อีกครั้ง แต่ส่งค่าด้วย lambda ที่ถูกต้อง
-                video_processor_factory=lambda: YOLOProcessor(
-                    yolo_model=st.session_state.yolo_model, 
-                    conf_threshold=st.session_state.confidence_threshold
-                ),
+                video_processor_factory=processor_factory,
                 rtc_configuration=ClientSettings(
                     rtc_offer_min_port=10000,
                     rtc_offer_max_port=10200,
