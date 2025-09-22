@@ -1,8 +1,9 @@
 streamlit==1.25.0
-ultralytics==8.0.12
+ultralytics==8.3.202
 streamlit-webrtc==0.45.0
 opencv-python==4.8.0
 av==10.0.0
 huggingface_hub==0.16.4
 aiortc==1.5.0
 pyee==11.0.0
+torch==1.8.0
