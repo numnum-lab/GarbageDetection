@@ -78,7 +78,7 @@ def display_detection_messages(detected_classes):
 
 # --- New Code Block for WebRTC ---
 class YOLOProcessor(VideoProcessorBase):
-    def __init__(self):
+    def __init__(self, yolo_model):
         # We'll need to pass the model to the processor later
         self.model = yolo_model
         # Use an empty container to display messages
@@ -177,6 +177,7 @@ if st.session_state.is_detecting:
                 rtc_offer_min_port=10000,
                 rtc_offer_max_port=10000 + 200,
             ),
+            args=(yolo_model,),
         )
     elif uploaded_file:
         file_extension = uploaded_file.name.split(".")[-1].lower()
