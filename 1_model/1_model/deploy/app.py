@@ -19,16 +19,20 @@ st.set_page_config(
 )
 
 # Debug: Show current working directory and file structure
-if st.checkbox("Show Debug Info", value=True):  # Changed to True for debugging
-    st.write("Current working directory:", os.getcwd())
-    st.write("Files in current directory:", os.listdir("."))
-    current_script_dir = Path(__file__).resolve().parent
-    st.write("Script directory:", str(current_script_dir))
-    st.write("Files in script directory:", os.listdir(str(current_script_dir)))
+if "yolo_model" not in st.session_state:
     try:
-        st.write("Files in parent directory:", os.listdir(".."))
-    except:
-        st.write("Cannot access parent directory")
+        # Get the directory where the script is located
+        script_dir = Path(__file__).resolve().parent
+        model_path = script_dir / "my_model.pt"
+
+        # Add the trusted class to PyTorch's allowed globals
+        with torch.serialization.safe_globals([DetectionModel]):
+            st.session_state.yolo_model = YOLO(str(model_path))
+        
+        st.success(f"YOLO Model loaded successfully!")
+    except Exception as e:
+        st.error(f"Error loading YOLO model: {e}")
+        st.stop()
 
 # Set up the correct path for imports
 current_dir = Path(__file__).resolve().parent
