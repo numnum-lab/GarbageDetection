@@ -239,20 +239,22 @@ if st.session_state.is_detecting:
         st.info("Detecting objects using webcam...")
         
         # Check if model is loaded before using WebRTC
+        # ... (โค้ดส่วนอื่นๆ)
         if "yolo_model" in st.session_state:
-            webrtc_streamer(
+                 webrtc_streamer(
                 key="yolo-stream",
-                # ✅ Pass the arguments using a lambda function
-                video_processor_factory=lambda: YOLOProcessor(
-                    st.session_state.yolo_model, 
-                    st.session_state.confidence_threshold
+                    # ใช้ lambda เพื่อส่งค่าจาก session state ไปยัง processor
+                 video_processor_factory=lambda: YOLOProcessor(
+                st.session_state.yolo_model, 
+                st.session_state.confidence_threshold
                 ),
-                rtc_configuration=ClientSettings(
-                    rtc_offer_min_port=10000,
-                    rtc_offer_max_port=10200,
-                ),
-            )
-            if "detected_classes" in st.session_state:
+             rtc_configuration=ClientSettings(
+                rtc_offer_min_port=10000,
+                rtc_offer_max_port=10200,
+        ),
+    )
+
+        if "detected_classes" in st.session_state:
                 display_detection_messages(st.session_state.detected_classes)
         else:
             st.error("YOLO model is not loaded. Please check the logs for errors.")
