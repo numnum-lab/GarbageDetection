@@ -1,4 +1,4 @@
-iimport cv2
+import cv2
 import streamlit as st
 from ultralytics import YOLO
 import tempfile
