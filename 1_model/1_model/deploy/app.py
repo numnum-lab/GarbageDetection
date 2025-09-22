@@ -62,12 +62,15 @@ if "confidence_threshold" not in st.session_state:
 if "yolo_model" not in st.session_state:
     model_loaded = False
     
-    # Try different possible paths
+    # Try different possible paths based on the actual structure
     possible_paths = [
         "my_model.pt",  # Same directory as app.py
         "../models/my_model.pt",  # Parent directory models folder
         "../../models/my_model.pt",  # Two levels up
         "models/my_model.pt",  # Models subfolder
+        "1_model/1_model/models/my_model.pt",  # From root directory
+        "1_model/models/my_model.pt",  # Alternative structure
+        "/mount/src/garbagedetection/1_model/1_model/models/my_model.pt",  # Absolute path
     ]
     
     for model_path in possible_paths:
