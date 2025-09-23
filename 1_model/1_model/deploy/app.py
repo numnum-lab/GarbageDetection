@@ -167,7 +167,7 @@ def process_frame(frame, conf_threshold, selected_classes):
 def realtime_detection(conf_threshold, selected_classes):
     """Real-time webcam detection with continuous processing"""
     # Initialize camera
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(1)
     
     # Check if camera opened successfully
     if not cap.isOpened():
