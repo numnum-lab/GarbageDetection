@@ -22,8 +22,8 @@ if "detected_classes" not in st.session_state:
 if "confidence_threshold" not in st.session_state:
     st.session_state.confidence_threshold = 0.2
 
-if "live_detection_active" not in st.session_state:
-    st.session_state.live_detection_active = False
+if "frame_skip" not in st.session_state:
+    st.session_state.frame_skip = 3  # Process every 3rd frame for performance
 
 # ------------------------------------------------
 # Streamlit Page Configuration
@@ -32,7 +32,7 @@ st.set_page_config(
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
-    page_title="Object Detection",
+    page_title="Real-time Object Detection",
 )
 
 # ------------------------------------------------
@@ -65,10 +65,10 @@ def load_yolo_model():
         repo_id = "Numgfsdf/garbage-detection-model"
         filename = "my_model.pt"
 
-        # Download model from Hugging Face
+        # ดาวน์โหลดไฟล์จาก Hugging Face
         model_path = hf_hub_download(repo_id=repo_id, filename=filename)
-        
-        # Load YOLO model
+
+        # โหลดโมเดล YOLO
         model = YOLO(model_path)
         st.success(f"โหลด YOLO Model สำเร็จจาก {model_path}!")
         return model
@@ -76,7 +76,7 @@ def load_yolo_model():
         st.error(f"เกิดข้อผิดพลาดในการโหลด YOLO model: {e}")
         return None
 
-# Load model once
+# โหลดโมเดลเพียงครั้งเดียว
 if "yolo_model" not in st.session_state:
     st.session_state.yolo_model = load_yolo_model()
 
@@ -85,7 +85,7 @@ if "yolo_model" not in st.session_state:
 # ------------------------------------------------
 def display_detection_messages(detected_classes):
     if detected_classes:
-        st.subheader("🎯 Detection Results:")
+        st.subheader("🎯 Real-time Detection Results:")
         unique_classes = list(set(detected_classes))
 
         if len(unique_classes) <= 2:
@@ -107,22 +107,25 @@ def display_detection_messages(detected_classes):
                 else:
                     st.error(f"⬛ {disposal_messages[class_name]}")
 
-def image_detection(uploaded_file, conf_threshold, selected_classes):
+def process_frame(frame, conf_threshold, selected_classes):
+    """Process a single frame for object detection"""
     if not st.session_state.yolo_model:
-        st.error("YOLO model is not loaded. Cannot perform image detection.")
-        return
+        return frame, []
 
-    image = Image.open(uploaded_file)
-    image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-
-    results = st.session_state.yolo_model.predict(source=image_cv, conf=conf_threshold)
+    # Run YOLO detection
+    results = st.session_state.yolo_model.predict(source=frame, conf=conf_threshold, verbose=False)
     detections = results[0]
+
+    if len(detections.boxes) == 0:
+        return frame, []
 
     boxes = detections.boxes.xyxy.cpu().numpy()
     confs = detections.boxes.conf.cpu().numpy()
     class_ids = detections.boxes.cls.cpu().numpy().astype(int)
 
     detected_classes = []
+    
+    # Filter by selected classes if any
     if selected_classes:
         filtered = [
             (box, conf, class_id)
@@ -137,112 +140,136 @@ def image_detection(uploaded_file, conf_threshold, selected_classes):
     else:
         detected_classes = [yolo_classes[class_id] for class_id in class_ids]
 
+    # Draw bounding boxes and labels
     for i, box in enumerate(boxes):
         x1, y1, x2, y2 = map(int, box)
         label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
-        cv2.rectangle(image_cv, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
-        cv2.putText(image_cv, label, (x1, y1 - 10),
+        
+        # Choose color based on class type
+        class_name = yolo_classes[class_ids[i]]
+        if class_name == "battery":
+            color = (0, 0, 255)  # Red
+        elif class_name == "biological":
+            color = (0, 255, 0)  # Green
+        elif class_name in ["cardboard", "glass", "metal", "paper", "plastic"]:
+            color = (0, 255, 255)  # Yellow
+        elif class_name in ["clothes", "shoes"]:
+            color = (255, 0, 0)  # Blue
+        else:
+            color = (128, 128, 128)  # Gray
+        
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(frame, label, (x1, y1 - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
+    return frame, detected_classes
+
+def realtime_detection(conf_threshold, selected_classes):
+    """Real-time webcam detection with continuous processing"""
+    # Initialize camera
+    cap = cv2.VideoCapture(0)
+    
+    # Check if camera opened successfully
+    if not cap.isOpened():
+        st.error("Cannot access webcam. Please check your camera permissions.")
+        return
+    
+    # Set camera properties for better performance
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    
+    # Create placeholders for video and results
+    video_placeholder = st.empty()
+    results_placeholder = st.empty()
+    stats_placeholder = st.empty()
+    
+    frame_count = 0
+    fps_counter = 0
+    start_time = time.time()
+    
+    try:
+        while st.session_state.is_detecting:
+            ret, frame = cap.read()
+            if not ret:
+                st.error("Failed to read from webcam")
+                break
+            
+            frame_count += 1
+            
+            # Process every nth frame for performance
+            if frame_count % st.session_state.frame_skip == 0:
+                # Process frame for detection
+                processed_frame, detected_classes = process_frame(frame, conf_threshold, selected_classes)
+                
+                # Update session state with latest detections
+                st.session_state.detected_classes = detected_classes
+                
+                # Display processed frame
+                frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                video_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
+                
+                # Display detection results
+                with results_placeholder.container():
+                    if detected_classes:
+                        display_detection_messages(detected_classes)
+                    else:
+                        st.info("🔍 Scanning for objects...")
+                
+                fps_counter += 1
+            else:
+                # Display unprocessed frame for smooth video
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                video_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
+            
+            # Update stats every 30 frames
+            if frame_count % 30 == 0:
+                elapsed_time = time.time() - start_time
+                fps = fps_counter / elapsed_time if elapsed_time > 0 else 0
+                stats_placeholder.metric("Processing FPS", f"{fps:.1f}")
+            
+            # Add small delay to prevent overwhelming the system
+            time.sleep(0.01)
+            
+    except Exception as e:
+        st.error(f"Error during real-time detection: {e}")
+    finally:
+        cap.release()
+        video_placeholder.empty()
+        st.info("📹 Webcam stopped")
+
+def image_detection(uploaded_file, conf_threshold, selected_classes):
+    """Static image detection (original functionality)"""
+    if not st.session_state.yolo_model:
+        st.error("YOLO model is not loaded. Cannot perform image detection.")
+        return
+
+    image = Image.open(uploaded_file)
+    image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+    processed_image, detected_classes = process_frame(image_cv, conf_threshold, selected_classes)
+
     col1, col2 = st.columns([2, 1])
     with col1:
-        st.image(image_cv, channels="BGR")
+        st.image(processed_image, channels="BGR")
     with col2:
         display_detection_messages(detected_classes)
-
-# ------------------------------------------------
-# Live Streaming Function (Modified for Streamlit)
-# ------------------------------------------------
-def live_streaming_detection(conf_threshold, selected_classes):
-    """
-    Live streaming detection using Streamlit's camera_input
-    This replaces cv2.VideoCapture which doesn't work in web browsers
-    """
-    st.info("📸 Live Detection Mode - Take photos to detect objects")
-    
-    # Create columns for better layout
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        # Use Streamlit's camera input for live capture
-        camera_image = st.camera_input("📷 Take a photo for detection", key="live_camera")
-        
-        if camera_image is not None:
-            # Process the captured image
-            try:
-                image = Image.open(camera_image)
-                image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-
-                # Run YOLO detection
-                results = st.session_state.yolo_model.predict(source=image_cv, conf=conf_threshold)
-                detections = results[0]
-
-                # Extract detection data
-                boxes = detections.boxes.xyxy.cpu().numpy()
-                confs = detections.boxes.conf.cpu().numpy()
-                class_ids = detections.boxes.cls.cpu().numpy().astype(int)
-
-                # Filter based on selected classes
-                detected_classes = []
-                if selected_classes:
-                    filtered = [
-                        (box, conf, class_id)
-                        for box, conf, class_id in zip(boxes, confs, class_ids)
-                        if yolo_classes[class_id] in selected_classes
-                    ]
-                    if filtered:
-                        boxes, confs, class_ids = zip(*filtered)
-                        detected_classes = [yolo_classes[class_id] for class_id in class_ids]
-                    else:
-                        boxes, confs, class_ids = [], [], []
-                else:
-                    detected_classes = [yolo_classes[class_id] for class_id in class_ids]
-
-                # Draw bounding boxes and labels
-                for i, box in enumerate(boxes):
-                    x1, y1, x2, y2 = map(int, box)
-                    label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
-                    cv2.rectangle(image_cv, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
-                    cv2.putText(
-                        image_cv,
-                        label,
-                        (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255, 255, 255),
-                        2,
-                    )
-
-                # Display processed image
-                st.image(image_cv, channels="BGR", caption="Processed Image")
-                
-                # Update session state with detected classes
-                st.session_state.detected_classes = detected_classes
-
-            except Exception as e:
-                st.error(f"Error during detection: {str(e)}")
-    
-    with col2:
-        # Display detection messages
-        if st.session_state.detected_classes:
-            display_detection_messages(st.session_state.detected_classes)
-        else:
-            st.info("📸 Take a photo to start detecting objects!")
-        
-        # Auto-refresh option
-        if st.checkbox("🔄 Auto-refresh camera", value=False):
-            time.sleep(2)
-            st.experimental_rerun()
 
 # ------------------------------------------------
 # Sidebar
 # ------------------------------------------------
 with st.sidebar:
-    st.title("Object Detection Settings ⚙️")
+    st.title("Real-time Detection Settings ⚙️")
     confidence_threshold = st.slider("Confidence Threshold", 0.0, 1.0, 0.2)
     st.session_state.confidence_threshold = confidence_threshold
 
     selected_classes = st.multiselect("Select classes for object detection", yolo_classes)
+    
+    # Performance settings
+    st.markdown("### Performance Settings")
+    frame_skip = st.slider("Frame Skip (1=process all frames)", 1, 10, 3,
+                          help="Higher values = better performance, lower accuracy")
+    st.session_state.frame_skip = frame_skip
 
     uploaded_file = st.file_uploader(
         "Upload an image 📤",
@@ -250,29 +277,32 @@ with st.sidebar:
     )
 
     # Detection mode selection
-    st.subheader("Detection Mode")
+    st.markdown("### Detection Mode")
     detection_mode = st.radio(
         "Choose detection mode:",
-        ["Single Image", "Live Camera"],
-        help="Single Image: Upload and analyze one image\nLive Camera: Use camera for continuous detection"
+        ["Static Image", "Real-time Webcam"],
+        index=1 if st.session_state.is_webcam_active else 0
     )
 
-    # Update session state based on mode
-    if detection_mode == "Live Camera":
-        st.session_state.is_webcam_active = True
-        st.session_state.live_detection_active = True
-    else:
-        st.session_state.is_webcam_active = False
-        st.session_state.live_detection_active = False
-
-    # Detection control button
-    if detection_mode == "Single Image" and uploaded_file:
-        detect_button = st.button("🔍 Analyze Image")
-        if detect_button:
-            st.session_state.is_detecting = True
-    elif detection_mode == "Live Camera":
-        if st.button("🎥 Start Live Detection" if not st.session_state.is_detecting else "🛑 Stop Live Detection"):
+    if detection_mode == "Real-time Webcam":
+        webcam_button = st.button(
+            "Start Real-time Detection 📹" if not st.session_state.is_detecting 
+            else "Stop Detection 🛑"
+        )
+        
+        if webcam_button:
             st.session_state.is_detecting = not st.session_state.is_detecting
+            st.session_state.is_webcam_active = st.session_state.is_detecting
+            
+    else:
+        detect_button = st.button(
+            "Analyze Image 🔍",
+            disabled=not uploaded_file,
+        )
+        
+        if detect_button and uploaded_file:
+            st.session_state.is_detecting = True
+            st.session_state.is_webcam_active = False
 
     # Disposal Guide
     st.markdown("---")
@@ -297,48 +327,74 @@ with st.sidebar:
 # ------------------------------------------------
 # Main Content
 # ------------------------------------------------
-st.title("🔍 Smart Garbage Detection & Sorting Assistant")
-
-# Handle different detection modes
-if st.session_state.is_detecting:
-    if st.session_state.live_detection_active:
-        # Live camera detection
-        live_streaming_detection(confidence_threshold, selected_classes)
-    elif uploaded_file:
-        # Single image detection
-        file_extension = uploaded_file.name.split(".")[-1].lower()
-        if file_extension in ["jpg", "jpeg", "png"]:
-            st.info("🔍 Detecting objects in uploaded image...")
-            image_detection(uploaded_file, confidence_threshold, selected_classes)
-            st.session_state.is_detecting = False  # Reset after single image processing
-        else:
-            st.warning("⚠️ Only image files (JPG, PNG, JPEG) are supported")
+if st.session_state.is_detecting and st.session_state.is_webcam_active:
+    st.title("🔴 Real-time Object Detection")
+    st.info("Real-time webcam detection is active. Objects will be detected and classified automatically.")
+    
+    # Start real-time detection
+    realtime_detection(confidence_threshold, selected_classes)
+    
+elif st.session_state.is_detecting and uploaded_file:
+    st.title("📸 Static Image Analysis")
+    st.info("Analyzing uploaded image...")
+    image_detection(uploaded_file, confidence_threshold, selected_classes)
+    st.session_state.is_detecting = False  # Reset after single image analysis
+    
 else:
-    # Welcome screen
+    st.title("Smart Garbage Detection & Sorting Assistant")
+    
     col1, col2 = st.columns(2)
     with col1:
         st.write("""
-        ### 🗂️ Garbage Detection Using YOLO
-        This project helps people sort garbage more easily using AI-powered object detection.
+        ### 🔍 Real-time Garbage Detection Using YOLO
+        This project helps people sort garbage more easily with real-time detection.
 
         **Features:**
-        - 📷 Live camera detection
-        - 🖼️ Single image analysis
-        - 🎯 Smart disposal recommendations
-        - 🗑️ Multiple waste categories supported
+        - **Real-time webcam detection** with continuous processing
+        - Static image analysis
+        - Smart disposal recommendations
+        - Performance optimization settings
+        - Color-coded detection boxes
         """)
 
     with col2:
         st.write("""
         ### 📖 How to Use:
-        1. **Choose** detection mode in the sidebar
-        2. **Upload** an image or use live camera
-        3. **Adjust** confidence threshold as needed
-        4. **Select** specific classes to detect (optional)
-        5. **Start detection** and follow the disposal instructions
 
-        The system will automatically provide disposal guidance for detected items!
+        **For Real-time Detection:**
+        1. Select "Real-time Webcam" mode
+        2. Click "Start Real-time Detection"
+        3. Point camera at objects
+        4. Follow real-time disposal instructions
+
+        **For Image Analysis:**
+        1. Select "Static Image" mode
+        2. Upload an image
+        3. Click "Analyze Image"
+        4. View results and disposal guidance
+        """)
+    
+    # Display demo information
+    with st.expander("🎯 Detection Classes"):
+        st.write("The system can detect and classify these waste types:")
+        cols = st.columns(2)
+        for i, class_name in enumerate(yolo_classes):
+            with cols[i % 2]:
+                st.write(f"• **{class_name.title()}**")
+    
+    # Performance tips
+    with st.expander("⚡ Performance Tips"):
+        st.write("""
+        - **Frame Skip**: Increase to 5-7 for better performance on slower devices
+        - **Confidence Threshold**: Lower values detect more objects but may include false positives
+        - **Selected Classes**: Choose specific classes to improve detection speed
+        - **Camera Resolution**: The app automatically sets optimal resolution for performance
         """)
 
-    # Display sample images or instructions
-    st.info("👈 Choose your detection mode from the sidebar to get started!")
+# ------------------------------------------------
+# Status indicator
+# ------------------------------------------------
+if st.session_state.is_detecting:
+    st.sidebar.success("🟢 Detection Active")
+else:
+    st.sidebar.info("⚪ Detection Inactive")
