@@ -1,4 +1,8 @@
-import cv2
+# Store camera mode in session state
+    if 'camera_mode' not in st.session_state:
+        st.session_state.camera_mode = camera_mode
+    else:
+        st.session_state.camera_mode = camera_modeimport cv2
 import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
@@ -6,6 +10,8 @@ import numpy as np
 import torch
 import time
 from huggingface_hub import hf_hub_download
+import threading
+import queue
 
 # ------------------------------------------------
 # Initial Session State
@@ -177,79 +183,204 @@ def image_detection(uploaded_file, conf_threshold, selected_classes):
     with col2:
         display_detection_messages(detected_classes)
 
-def real_time_detection(conf_threshold, selected_classes):
-    """Real-time webcam detection with YOLO"""
+def camera_input_detection(conf_threshold, selected_classes):
+    """Camera detection using Streamlit's camera_input with auto-refresh"""
     if not st.session_state.yolo_model:
-        st.error("YOLO model is not loaded. Cannot perform real-time detection.")
+        st.error("YOLO model is not loaded. Cannot perform detection.")
         return
 
-    # Initialize webcam
-    cap = cv2.VideoCapture(0)
+    st.info("📷 **Live Camera Detection Active** - Take photos to analyze objects")
     
-    if not cap.isOpened():
-        st.error("Could not access webcam. Please check your camera permissions.")
-        return
-
-    # Create placeholders for video and detection results
+    # Create columns for layout
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        video_placeholder = st.empty()
-    with col2:
-        detection_placeholder = st.empty()
-
-    # Control buttons
-    stop_button = st.button("Stop Real-time Detection 🛑", key="stop_realtime")
-    
-    # FPS counter
-    fps_placeholder = st.empty()
-    frame_count = 0
-    start_time = time.time()
-
-    try:
-        while st.session_state.is_detecting and not stop_button:
-            ret, frame = cap.read()
-            if not ret:
-                st.error("Failed to read from webcam")
-                break
-
-            # Process frame with YOLO
+        # Use camera_input which properly requests browser permissions
+        camera_image = st.camera_input(
+            "Take a photo for detection", 
+            key="live_camera",
+            help="This will request camera permission from your browser"
+        )
+        
+        if camera_image is not None:
+            # Process the captured image
+            image = Image.open(camera_image)
+            image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            
+            # Process with YOLO
             processed_frame, detected_classes = process_frame_with_detection(
-                frame, conf_threshold, selected_classes
+                image_cv, conf_threshold, selected_classes
             )
-
-            # Convert BGR to RGB for Streamlit
-            display_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
             
-            # Update video display
-            video_placeholder.image(display_frame, channels="RGB", use_column_width=True)
+            # Display processed image
+            st.image(processed_frame, channels="BGR", caption="Detection Results")
             
-            # Update detection results
-            with detection_placeholder.container():
-                if detected_classes:
-                    st.subheader("🎯 Live Detection:")
-                    display_detection_messages(detected_classes)
-                else:
-                    st.info("No objects detected")
+            # Store results in session state for the sidebar
+            st.session_state.detected_classes = detected_classes
+            
+        else:
+            st.info("📸 Click the camera button above to take a photo and detect objects")
+    
+    with col2:
+        # Display current detection results
+        if hasattr(st.session_state, 'detected_classes') and st.session_state.detected_classes:
+            st.subheader("🎯 Latest Detection:")
+            display_detection_messages(st.session_state.detected_classes)
+        else:
+            st.info("No recent detections")
+            
+        # Auto-refresh option
+        auto_refresh = st.checkbox("Auto-refresh camera", value=False)
+        if auto_refresh:
+            time.sleep(2)
+            st.rerun()
 
-            # Calculate and display FPS
-            frame_count += 1
-            elapsed_time = time.time() - start_time
-            if elapsed_time > 1.0:  # Update FPS every second
-                fps = frame_count / elapsed_time
-                fps_placeholder.metric("FPS", f"{fps:.1f}")
-                frame_count = 0
-                start_time = time.time()
+def continuous_camera_detection(conf_threshold, selected_classes):
+    """Alternative approach using camera_input with continuous refresh"""
+    if not st.session_state.yolo_model:
+        st.error("YOLO model is not loaded. Cannot perform detection.")
+        return
 
-            # Small delay to prevent overwhelming the system
-            time.sleep(0.03)  # ~30 FPS max
+    st.info("🔴 **Continuous Camera Detection** - Photos will be taken automatically")
+    
+    # Initialize session state for continuous mode
+    if "photo_counter" not in st.session_state:
+        st.session_state.photo_counter = 0
+    
+    # Create placeholders
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Use a unique key for each photo to force refresh
+        camera_key = f"continuous_camera_{st.session_state.photo_counter}"
+        
+        camera_image = st.camera_input(
+            "Continuous Detection Camera",
+            key=camera_key,
+            help="Camera will automatically refresh for continuous detection"
+        )
+        
+        if camera_image is not None:
+            # Process the image
+            image = Image.open(camera_image)
+            image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            
+            processed_frame, detected_classes = process_frame_with_detection(
+                image_cv, conf_threshold, selected_classes
+            )
+            
+            st.image(processed_frame, channels="BGR")
+            st.session_state.detected_classes = detected_classes
+            
+            # Auto-increment counter and refresh
+            st.session_state.photo_counter += 1
+            time.sleep(1)  # Small delay
+            st.rerun()
+    
+    with col2:
+        if hasattr(st.session_state, 'detected_classes') and st.session_state.detected_classes:
+            st.subheader("🎯 Live Detection:")
+            display_detection_messages(st.session_state.detected_classes)
+        else:
+            st.info("Waiting for detection...")
 
-    except Exception as e:
-        st.error(f"Error during real-time detection: {e}")
-    finally:
-        cap.release()
-        st.session_state.is_detecting = False
-        st.session_state.is_webcam_active = False
+def webcam_html_detection():
+    """HTML/JavaScript based webcam access (experimental)"""
+    st.info("🌐 **Browser-based Camera Access**")
+    
+    html_code = """
+    <div id="camera-container">
+        <video id="video" width="640" height="480" autoplay style="border: 2px solid #4CAF50;"></video>
+        <br><br>
+        <button onclick="capturePhoto()" style="background-color: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer;">📸 Capture Photo</button>
+        <canvas id="canvas" width="640" height="480" style="display: none;"></canvas>
+    </div>
+    
+    <script>
+    let video = document.getElementById('video');
+    let canvas = document.getElementById('canvas');
+    let ctx = canvas.getContext('2d');
+    
+    // Request camera access
+    navigator.mediaDevices.getUserMedia({ video: true })
+        .then(function(stream) {
+            video.srcObject = stream;
+            console.log("Camera access granted");
+        })
+        .catch(function(err) {
+            console.error("Camera access denied: ", err);
+            alert("Please allow camera access to use this feature");
+        });
+    
+    function capturePhoto() {
+        ctx.drawImage(video, 0, 0, 640, 480);
+        let imageData = canvas.toDataURL('image/jpeg');
+        
+        // Send image data to Streamlit (this would need additional implementation)
+        console.log("Photo captured");
+        alert("Photo captured! (Implementation for sending to Streamlit needed)");
+    }
+    </script>
+    """
+    
+    st.components.v1.html(html_code, height=600)
+    st.warning("⚠️ This is an experimental feature. The captured photos are not yet integrated with YOLO detection.")
+
+# Alternative: Simple periodic camera capture
+def periodic_camera_detection(conf_threshold, selected_classes):
+    """Periodic camera capture for quasi-real-time detection"""
+    if not st.session_state.yolo_model:
+        st.error("YOLO model is not loaded. Cannot perform detection.")
+        return
+
+    st.info("⏱️ **Periodic Camera Detection** - Camera refreshes every few seconds")
+    
+    # Auto-refresh mechanism
+    if "last_refresh" not in st.session_state:
+        st.session_state.last_refresh = time.time()
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Refresh interval control
+        refresh_interval = st.slider("Refresh interval (seconds)", 1, 10, 3)
+        
+        # Check if it's time to refresh
+        current_time = time.time()
+        if current_time - st.session_state.last_refresh >= refresh_interval:
+            st.session_state.last_refresh = current_time
+            st.rerun()
+        
+        # Camera input
+        camera_image = st.camera_input("Detection Camera", key=f"periodic_{int(st.session_state.last_refresh)}")
+        
+        if camera_image is not None:
+            image = Image.open(camera_image)
+            image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            
+            processed_frame, detected_classes = process_frame_with_detection(
+                image_cv, conf_threshold, selected_classes
+            )
+            
+            st.image(processed_frame, channels="BGR")
+            st.session_state.detected_classes = detected_classes
+    
+    with col2:
+        # Countdown timer
+        time_since_refresh = current_time - st.session_state.last_refresh
+        time_until_next = max(0, refresh_interval - time_since_refresh)
+        st.metric("Next refresh in", f"{time_until_next:.1f}s")
+        
+        # Detection results
+        if hasattr(st.session_state, 'detected_classes') and st.session_state.detected_classes:
+            st.subheader("🎯 Current Detection:")
+            display_detection_messages(st.session_state.detected_classes)
+        else:
+            st.info("No objects detected")
+        
+        # Progress bar for refresh
+        progress = (refresh_interval - time_until_next) / refresh_interval
+        st.progress(progress)
 
 # ------------------------------------------------
 # Sidebar
@@ -266,8 +397,21 @@ with st.sidebar:
         type=["jpg", "png", "jpeg"],
     )
 
-    # Real-time webcam button
-    if st.button("Start Real-time Detection 📷" if not st.session_state.is_webcam_active else "Stop Real-time Detection 🛑"):
+    # Camera detection mode selection
+    st.markdown("### 📷 Camera Detection Modes")
+    camera_mode = st.radio(
+        "Choose camera detection mode:",
+        [
+            "📸 Manual Photo Capture",
+            "⏱️ Periodic Auto-Capture", 
+            "🔄 Continuous Refresh",
+            "🌐 Browser Camera (Experimental)"
+        ],
+        help="Different approaches to camera-based detection"
+    )
+
+    # Real-time webcam button (updated text)
+    if st.button("Start Camera Detection 📷" if not st.session_state.is_webcam_active else "Stop Camera Detection 🛑"):
         st.session_state.is_webcam_active = not st.session_state.is_webcam_active
         st.session_state.is_detecting = st.session_state.is_webcam_active
 
@@ -304,9 +448,21 @@ with st.sidebar:
 # Main Content
 # ------------------------------------------------
 if st.session_state.is_webcam_active and st.session_state.is_detecting:
-    st.title("🔴 Real-time Object Detection")
-    st.info("Real-time detection is active. The model is running continuously on your webcam feed.")
-    real_time_detection(confidence_threshold, selected_classes)
+    # Get camera mode from sidebar
+    camera_mode = st.session_state.get('camera_mode', '📸 Manual Photo Capture')
+    
+    if camera_mode == "📸 Manual Photo Capture":
+        st.title("📸 Manual Camera Detection")
+        camera_input_detection(confidence_threshold, selected_classes)
+    elif camera_mode == "⏱️ Periodic Auto-Capture":
+        st.title("⏱️ Periodic Camera Detection") 
+        periodic_camera_detection(confidence_threshold, selected_classes)
+    elif camera_mode == "🔄 Continuous Refresh":
+        st.title("🔄 Continuous Camera Detection")
+        continuous_camera_detection(confidence_threshold, selected_classes)
+    elif camera_mode == "🌐 Browser Camera (Experimental)":
+        st.title("🌐 Browser-based Camera Detection")
+        webcam_html_detection()
     
 elif uploaded_file and st.session_state.is_detecting:
     st.title("🖼️ Image Object Detection")
@@ -330,7 +486,9 @@ else:
         This project helps people sort garbage more easily.
 
         **Features:**
-        - **Real-time webcam detection** with live YOLO processing
+        - **Multiple camera detection modes** with browser permission support
+        - **Manual photo capture** for precise detection  
+        - **Periodic auto-capture** for quasi-real-time detection
         - **Image analysis** for uploaded photos
         - **Smart disposal recommendations**
         - **Multiple waste categories** supported
@@ -342,11 +500,15 @@ else:
         st.write("""
         ### 📖 How to Use:
 
-        **For Real-time Detection:**
-        1. Click **"Start Real-time Detection"** 📷
-        2. Allow camera access when prompted
-        3. Point camera at objects to detect
-        4. View live detection results and disposal instructions
+        **For Camera Detection:**
+        1. **Select a camera mode** in the sidebar:
+           - 📸 **Manual**: Click to take photos for detection
+           - ⏱️ **Periodic**: Automatic photo capture at intervals  
+           - 🔄 **Continuous**: Rapid refresh for near real-time
+           - 🌐 **Browser**: Direct browser camera access
+        2. Click **"Start Camera Detection"** 📷
+        3. **Allow camera access** when browser prompts
+        4. Point camera at objects and follow the mode instructions
 
         **For Image Detection:**
         1. **Upload** an image using the file uploader
