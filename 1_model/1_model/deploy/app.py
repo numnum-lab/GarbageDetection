@@ -9,7 +9,6 @@ from pathlib import Path
 import os
 import torch
 from ultralytics.nn.tasks import DetectionModel
-import threading
 import time
 
 # Set page config first
@@ -39,7 +38,7 @@ disposal_messages = {
     "trash": "🗑️ **General trash detected!** Dispose in the **GENERAL** bin.",
 }
 
-# Color mapping for different waste types
+# Color mapping for different waste types (BGR format for OpenCV)
 color_mapping = {
     "battery": (0, 0, 255),      # Red - Hazardous
     "biological": (0, 255, 0),   # Green - Organic
@@ -60,10 +59,8 @@ if "confidence_threshold" not in st.session_state:
     st.session_state.confidence_threshold = 0.25
 if "detected_objects" not in st.session_state:
     st.session_state.detected_objects = []
-if "camera_thread" not in st.session_state:
-    st.session_state.camera_thread = None
-if "stop_camera" not in st.session_state:
-    st.session_state.stop_camera = False
+if "camera_initialized" not in st.session_state:
+    st.session_state.camera_initialized = False
 
 # Load YOLO model
 @st.cache_resource
@@ -175,68 +172,127 @@ def process_frame_with_yolo(frame, model, conf_threshold, selected_classes=None)
     
     return frame, detected_classes
 
-def camera_loop(model, conf_threshold, selected_classes, placeholder, detection_placeholder):
-    """Main camera loop for real-time detection"""
+def initialize_camera():
+    """Initialize the camera and return the capture object"""
     cap = cv2.VideoCapture(0)
+    
+    if not cap.isOpened():
+        st.error("❌ Could not open camera. Please check if your camera is connected and not being used by another application.")
+        return None
     
     # Set camera properties for better performance
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FPS, 30)
     
-    if not cap.isOpened():
-        st.error("❌ Could not open camera. Please check if your camera is connected and not being used by another application.")
+    return cap
+
+def run_camera_detection(model, conf_threshold, selected_classes):
+    """Run camera detection with auto-refresh"""
+    
+    # Initialize camera
+    cap = initialize_camera()
+    if cap is None:
         return
     
+    # Create placeholders
+    col1, col2 = st.columns([3, 2])
+    
+    with col1:
+        st.subheader("📹 Live Camera Feed")
+        video_placeholder = st.empty()
+        fps_placeholder = st.empty()
+    
+    with col2:
+        st.subheader("🎯 Detection Results")
+        detection_placeholder = st.empty()
+    
+    # Control buttons
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        stop_button = st.button("🛑 Stop Detection", type="secondary", use_container_width=True)
+    with col_btn2:
+        refresh_button = st.button("🔄 Refresh", type="primary", use_container_width=True)
+    
+    if stop_button:
+        cap.release()
+        st.session_state.camera_active = False
+        st.rerun()
+    
+    # Auto-refresh mechanism
+    auto_refresh = st.empty()
+    
+    # Main detection loop
     fps_counter = 0
     start_time = time.time()
+    frame_count = 0
     
-    while st.session_state.camera_active and not st.session_state.stop_camera:
-        ret, frame = cap.read()
-        if not ret:
-            st.error("❌ Failed to capture frame from camera")
-            break
-        
-        # Flip frame horizontally for mirror effect
-        frame = cv2.flip(frame, 1)
-        
-        # Process frame with YOLO
-        processed_frame, detected_classes = process_frame_with_yolo(
-            frame, model, conf_threshold, selected_classes
-        )
-        
-        # Update detected objects in session state
-        st.session_state.detected_objects = detected_classes
-        
-        # Convert BGR to RGB for Streamlit
-        frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-        
-        # Calculate and display FPS
-        fps_counter += 1
-        if fps_counter % 30 == 0:  # Update FPS every 30 frames
-            current_time = time.time()
-            fps = 30 / (current_time - start_time)
-            start_time = current_time
+    try:
+        while st.session_state.camera_active:
+            ret, frame = cap.read()
+            if not ret:
+                st.error("❌ Failed to capture frame from camera")
+                break
             
-        # Add FPS to frame
-        cv2.putText(processed_frame, f"FPS: {fps:.1f}" if 'fps' in locals() else "FPS: --", 
-                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        # Update the display
-        placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
-        
-        # Update detection messages
-        with detection_placeholder.container():
-            if detected_classes:
-                display_detection_messages(detected_classes)
+            # Flip frame horizontally for mirror effect
+            frame = cv2.flip(frame, 1)
+            
+            # Process every few frames to improve performance
+            if frame_count % 2 == 0:  # Process every 2nd frame
+                # Process frame with YOLO
+                processed_frame, detected_classes = process_frame_with_yolo(
+                    frame, model, conf_threshold, selected_classes
+                )
+                
+                # Update detected objects in session state
+                st.session_state.detected_objects = detected_classes
+                
+                # Calculate FPS
+                fps_counter += 1
+                if fps_counter % 30 == 0:  # Update FPS every 30 processed frames
+                    current_time = time.time()
+                    fps = 30 / (current_time - start_time)
+                    start_time = current_time
+                
+                # Add FPS to frame
+                fps_text = f"FPS: {fps:.1f}" if 'fps' in locals() else "FPS: --"
+                cv2.putText(processed_frame, fps_text, (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                
+                # Convert BGR to RGB for Streamlit
+                frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                
+                # Update displays
+                video_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
+                fps_placeholder.info(f"📊 {fps_text} | Frame: {frame_count}")
+                
+                # Update detection messages
+                with detection_placeholder.container():
+                    if detected_classes:
+                        display_detection_messages(detected_classes)
+                    else:
+                        st.info("👁️ Looking for objects...")
             else:
-                st.info("👁️ Looking for objects...")
-        
-        # Small delay to prevent overwhelming the UI
-        time.sleep(0.033)  # ~30 FPS
-    
-    cap.release()
-    st.session_state.camera_active = False
+                # For non-processed frames, just convert and display
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                video_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
+            
+            frame_count += 1
+            
+            # Auto-refresh mechanism to keep the stream active
+            if frame_count % 300 == 0:  # Refresh every 300 frames (~10 seconds)
+                with auto_refresh.container():
+                    st.empty()
+                time.sleep(0.01)
+            
+            # Small delay to prevent overwhelming
+            time.sleep(0.033)  # ~30 FPS
+            
+    except Exception as e:
+        st.error(f"Camera error: {e}")
+    finally:
+        cap.release()
+        st.session_state.camera_active = False
 
 def image_detection(uploaded_file, model, conf_threshold, selected_classes):
     """Process uploaded image"""
@@ -298,21 +354,28 @@ with st.sidebar:
         if st.button("🚀 Start Real-time Detection", type="primary", use_container_width=True):
             if yolo_model is not None:
                 st.session_state.camera_active = True
-                st.session_state.stop_camera = False
                 st.rerun()
             else:
                 st.error("Cannot start camera: YOLO model not loaded")
     else:
-        if st.button("🛑 Stop Detection", type="secondary", use_container_width=True):
-            st.session_state.camera_active = False
-            st.session_state.stop_camera = True
-            st.rerun()
+        st.info("Camera is running... Use stop button in main area to stop.")
     
     # Status indicator
     if st.session_state.camera_active:
         st.success("🟢 Camera Active")
     else:
         st.info("🔴 Camera Inactive")
+    
+    # Camera troubleshooting
+    with st.expander("🔧 Camera Troubleshooting"):
+        st.markdown("""
+        **If camera doesn't work:**
+        1. **Check camera permissions** - Allow browser to access camera
+        2. **Close other apps** - Ensure no other apps are using the camera
+        3. **Refresh page** - Sometimes helps reset camera state
+        4. **Try different browser** - Chrome/Firefox usually work best
+        5. **Check camera index** - Some systems may need camera index 1 or 2
+        """)
     
     # Disposal Guide
     st.markdown("---")
@@ -350,19 +413,7 @@ if yolo_model is None:
 # Main application logic
 if st.session_state.camera_active:
     st.info("🎥 **Real-time detection active** - Objects will be detected and classified in real-time!")
-    
-    # Create placeholders for video feed and detection results
-    video_placeholder = st.empty()
-    detection_placeholder = st.empty()
-    
-    # Start camera in a separate thread
-    if st.session_state.camera_thread is None or not st.session_state.camera_thread.is_alive():
-        st.session_state.camera_thread = threading.Thread(
-            target=camera_loop,
-            args=(yolo_model, confidence_threshold, selected_classes, video_placeholder, detection_placeholder),
-            daemon=True
-        )
-        st.session_state.camera_thread.start()
+    run_camera_detection(yolo_model, confidence_threshold, selected_classes)
 
 elif uploaded_file:
     st.info("📸 **Image Detection Mode** - Analyzing uploaded image...")
@@ -390,6 +441,14 @@ else:
         2. **Image Analysis**: Upload an image using the sidebar
         3. **Adjust Settings**: Fine-tune confidence threshold and select specific classes
         4. **Follow Instructions**: Get instant disposal guidance for detected objects
+        """)
+        
+        # Quick start guide
+        st.info("""
+        💡 **Quick Start:**
+        - Grant camera permissions when prompted
+        - Point camera at objects to detect
+        - View real-time classifications and disposal instructions
         """)
     
     with col2:
@@ -427,6 +486,9 @@ st.markdown("""
         padding: 1rem 0;
         border-bottom: 2px solid #f0f2f6;
         margin-bottom: 2rem;
+    }
+    div[data-testid="column"] {
+        padding: 0.5rem;
     }
 </style>
 """, unsafe_allow_html=True)
