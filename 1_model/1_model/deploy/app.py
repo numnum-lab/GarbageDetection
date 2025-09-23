@@ -204,7 +204,6 @@ with st.sidebar:
 # ------------------------------------------------
 # Main Content - เพิ่ม webcam functionality แบบง่าย
 # ------------------------------------------------
-
 if st.session_state.is_detecting:
     if st.session_state.is_webcam_active:
         st.info("🔴 Webcam mode active - Use camera input below")
@@ -250,16 +249,3 @@ else:
 
         The system will automatically provide disposal guidance for detected items!
         """)
-    cam = cv2.VideoCapture(0)
-    cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    FRAME_WINDOW = st.image([])
-    
-    while True:
-        ret, frame = cam.read()
-        if not ret:
-            st.error("Failed to capture frame from camera")
-            st.info("Please turn off the other app that is using the camera and restart app")
-            st.stop()
-        image, name, id = image_detection(frame)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
