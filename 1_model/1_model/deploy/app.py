@@ -170,7 +170,7 @@ POSE_ESTIMATION_MODEL = MODEL_DIR/'yolo11n-pose.pt'
 
     
     # Filter detections based on selected classes
-    if selected_classes:
+if selected_classes:
         filtered_results = [
             (box, conf, class_id)
             for box, conf, class_id in zip(boxes, confs, class_ids)
@@ -178,21 +178,21 @@ POSE_ESTIMATION_MODEL = MODEL_DIR/'yolo11n-pose.pt'
         ]
         boxes, confs, class_ids = zip(*filtered_results) if filtered_results else ([], [], [])
         detected_classes = [yolo_classes[class_id] for class_id in class_ids]
-    else:
+else:
         detected_classes = [yolo_classes[class_id] for class_id in class_ids]
 
     # Draw bounding boxes on the image
-    for i, box in enumerate(boxes):
+for i, box in enumerate(boxes):
         x1, y1, x2, y2 = map(int, box)
         label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
         cv2.rectangle(image_cv, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
         cv2.putText(image_cv, label, (x1, y1 - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
+col1, col2 = st.columns([2, 1])
+with col1:
         st.image(image_cv, channels="BGR")
-    with col2:
+with col2:
         display_detection_messages(detected_classes)
 
 # ------------------------------------------------
