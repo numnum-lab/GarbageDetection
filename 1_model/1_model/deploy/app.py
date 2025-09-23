@@ -81,105 +81,30 @@ def load_yolo_model():
 if "yolo_model" not in st.session_state:
     st.session_state.yolo_model = load_yolo_model()
 
-# ลบ Video Processor Class ออกทั้งหมด (เพราะใช้ WebRTC)
-
-# ------------------------------------------------
-# Helper Functions
-# ------------------------------------------------
-def display_detection_messages(detected_classes):
-    if detected_classes:
-        st.subheader("🎯 Detection Results:")
-        unique_classes = list(set(detected_classes))
-
-        if len(unique_classes) <= 2:
-            cols = st.columns(len(unique_classes))
-        else:
-            cols = st.columns(2)
-
-        for i, class_name in enumerate(unique_classes):
-            col_index = i if len(unique_classes) <= 2 else i % 2
-            with cols[col_index]:
-                if class_name == "battery":
-                    st.error(f"🟥 {disposal_messages[class_name]}")
-                elif class_name == "biological":
-                    st.success(f"🟢 {disposal_messages[class_name]}")
-                elif class_name in ["cardboard", "glass", "metal", "paper", "plastic"]:
-                    st.warning(f"🟡 {disposal_messages[class_name]}")
-                elif class_name in ["clothes", "shoes"]:
-                    st.info(f"🟦 {disposal_messages[class_name]}")
-                else:
-                    st.error(f"⬛ {disposal_messages[class_name]}")
-
-def image_detection(uploaded_file, conf_threshold, selected_classes):
-    if not st.session_state.yolo_model:
-        st.error("YOLO model is not loaded. Cannot perform image detection.")
-        return
-
-    image = Image.open(uploaded_file)
-    image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-
-    results = st.session_state.yolo_model.predict(source=image_cv, conf=conf_threshold)
-    detections = results[0]
-
-    boxes = detections.boxes.xyxy.cpu().numpy()
-    confs = detections.boxes.conf.cpu().numpy()
-    class_ids = detections.boxes.cls.cpu().numpy().astype(int)
-
-    detected_classes = []
-    if selected_classes:
-        filtered = [
-            (box, conf, class_id)
-            for box, conf, class_id in zip(boxes, confs, class_ids)
-            if yolo_classes[class_id] in selected_classes
-        ]
-        if filtered:
-            boxes, confs, class_ids = zip(*filtered)
-            detected_classes = [yolo_classes[class_id] for class_id in class_ids]
-        else:
-            boxes, confs, class_ids = [], [], []
-    else:
-        detected_classes = [yolo_classes[class_id] for class_id in class_ids]
-
-    for i, box in enumerate(boxes):
-        x1, y1, x2, y2 = map(int, box)
-        label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
-        cv2.rectangle(image_cv, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
-        cv2.putText(image_cv, label, (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.image(image_cv, channels="BGR")
-    with col2:
-        display_detection_messages(detected_classes)
-
 # ------------------------------------------------
 # Sidebar
 # ------------------------------------------------
-with st.sidebar:
-    st.title("Object Detection Settings ⚙️")
-    confidence_threshold = st.slider("Confidence Threshold", 0.0, 1.0, 0.2)
-    st.session_state.confidence_threshold = confidence_threshold
+    st.set_page_config(layout="wide")
+#Config
+    cfg = load_yolo_model()
+    PICTURE_PROMPT = cfg['INFO']['PICTURE_PROMPT']
+    WEBCAM_PROMPT = cfg['INFO']['WEBCAM_PROMPT']
 
-    selected_classes = st.multiselect("Select classes for object detection", yolo_classes)
 
-    uploaded_file = st.file_uploader(
-        "Upload an image 📤",
-        type=["jpg", "png", "jpeg"],
-    )
 
-    # เพิ่ม webcam functionality กลับมา
-    if st.button("Use Webcam 📷" if not st.session_state.is_webcam_active else "Stop Webcam 🛑"):
-        st.session_state.is_webcam_active = not st.session_state.is_webcam_active
-        st.session_state.is_detecting = st.session_state.is_webcam_active
+    st.sidebar.title("Settings")
 
-    detect_button = st.button(
-        ("Start Detection ▶️" if not st.session_state.is_detecting else "Stop Detection 🛑"),
-        disabled=(not uploaded_file and not st.session_state.is_webcam_active),
-    )
 
-    if detect_button:
-        st.session_state.is_detecting = not st.session_state.is_detecting
+
+#Create a menu bar
+    menu = ["Picture","Webcam"]
+    choice = st.sidebar.selectbox("Input type",menu)
+    #Put slide to adjust tolerance
+    TOLERANCE = st.sidebar.slider("Tolerance",0.0,1.0,0.5,0.01)
+    st.sidebar.info("Tolerance is the threshold for face recognition. The lower the tolerance, the more strict the face recognition. The higher the tolerance, the more loose the face recognition.")
+
+#Infomation section 
+    st.sidebar.title("trast")
 
     # Disposal Guide
     st.markdown("---")
@@ -204,28 +129,6 @@ with st.sidebar:
 # ------------------------------------------------
 # Main Content - เพิ่ม webcam functionality แบบง่าย
 # ------------------------------------------------
-if st.session_state.is_detecting:
-    if st.session_state.is_webcam_active:
-        st.info("🔴 Webcam mode active - Use camera input below")
-        
-        # ใช้ st.camera_input แทน WebRTC
-        camera_image = st.camera_input("Take a picture")
-        
-        if camera_image is not None:
-            st.info("Processing camera image...")
-            image_detection(camera_image, confidence_threshold, selected_classes)
-            
-    elif uploaded_file:
-        file_extension = uploaded_file.name.split(".")[-1].lower()
-        if file_extension in ["jpg", "jpeg", "png"]:
-            st.info("Detecting objects in image...")
-            image_detection(uploaded_file, confidence_threshold, selected_classes)
-        else:
-            st.warning("Only image files are supported in this version")
-else:
-    st.title("Smart Garbage Detection & Sorting Assistant")
-    st.info("Upload an image or activate webcam for object detection.")
-
     col1, col2 = st.columns(2)
     with col1:
         st.write("""
