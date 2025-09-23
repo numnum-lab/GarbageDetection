@@ -208,8 +208,14 @@ if st.session_state.is_detecting:
     if st.session_state.is_webcam_active:
         st.info("🔴 Webcam mode active - Use camera input below")
         
-        # ใช้ st.camera_input แทน WebRTC
-        camera_image = st.camera_input("Take a picture")
+        cap = cv2.VideoCapture(tfile.name)
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            results = model(frame)
+            annotated_frame = results[0].plot()
+            stframe.image(annotated_frame, channels="BGR"))
         
         if camera_image is not None:
             st.info("Processing camera image...")
