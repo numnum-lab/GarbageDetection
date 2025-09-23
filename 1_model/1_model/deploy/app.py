@@ -1,8 +1,8 @@
 # Store camera mode in session state
-    if 'camera_mode' not in st.session_state:
-        st.session_state.camera_mode = camera_mode
-    else:
-        st.session_state.camera_mode = camera_modeimport cv2
+if 'camera_mode' not in st.session_state:
+    st.session_state.camera_mode = camera_mode
+else:
+    st.session_state.camera_mode = camera_modeimport cv2
 import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
