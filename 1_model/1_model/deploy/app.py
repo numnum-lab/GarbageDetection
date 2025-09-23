@@ -3,12 +3,8 @@ import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
 import numpy as np
-# ลบ streamlit_webrtc และ WebRTC-related imports ออก
-# from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-# import av
 import torch
-# ลบ functools.partial ออก (ใช้แค่สำหรับ webcam)
-# from functools import partial
+import time
 from huggingface_hub import hf_hub_download
 
 # ------------------------------------------------
@@ -202,18 +198,33 @@ with st.sidebar:
         st.error("🗑️ **Trash:** Dispose in the **GENERAL** bin.")
 
 # ------------------------------------------------
-# Main Content - เพิ่ม webcam functionality แบบง่าย
+# Main Content - Semi-real-time webcam with auto-refresh
 # ------------------------------------------------
 if st.session_state.is_detecting:
     if st.session_state.is_webcam_active:
-        st.info("🔴 Webcam mode active - Use camera input below")
+        st.info("🔴 Real-time detection mode active")
+        st.warning("⚠️ Take a new photo every few seconds for continuous detection")
         
-        # ใช้ st.camera_input แทน WebRTC
-        camera_image = st.camera_input("Take a picture")
+        # Auto-refresh container
+        placeholder = st.empty()
         
-        if camera_image is not None:
-            st.info("Processing camera image...")
-            image_detection(camera_image, confidence_threshold, selected_classes)
+        with placeholder.container():
+            # ใช้ st.camera_input แทน WebRTC
+            camera_image = st.camera_input("📸 Live Camera Feed", key=f"camera_{int(time.time())}")
+            
+            if camera_image is not None:
+                st.info("🔍 Processing image...")
+                image_detection(camera_image, confidence_threshold, selected_classes)
+        
+        # Auto-refresh every 3 seconds
+        if st.button("🔄 Refresh Camera", key="refresh_cam"):
+            st.rerun()
+            
+        # Auto-refresh countdown
+        with st.sidebar:
+            if st.checkbox("Auto-refresh every 5 seconds"):
+                time.sleep(5)
+                st.rerun()
             
     elif uploaded_file:
         file_extension = uploaded_file.name.split(".")[-1].lower()
@@ -233,7 +244,8 @@ else:
         This project helps people sort garbage more easily.
 
         **Features:**
-        - Real-time webcam capture
+        - Semi-real-time webcam capture
+        - Auto-refresh detection
         - Image analysis
         - Smart disposal recommendations
         - Multiple waste categories supported
@@ -246,6 +258,7 @@ else:
         2. **Adjust** confidence threshold as needed
         3. **Select** specific classes to detect (optional)
         4. **Start detection** and follow the disposal instructions
+        5. **Enable auto-refresh** for continuous monitoring
 
         The system will automatically provide disposal guidance for detected items!
         """)
