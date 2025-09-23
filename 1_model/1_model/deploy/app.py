@@ -135,27 +135,39 @@ def display_detection_messages(detected_classes):
                 else:
                     st.error(f"⬛ {message}")
 
-def image_detection(uploaded_file, conf_threshold, selected_classes):
-    """
-    Handles object detection for an uploaded image.
-    """
-    if not st.session_state.yolo_model:
-        st.error("YOLO model is not loaded. Cannot perform image detection.")
-        return
+#Sources
+IMAGE = 'Image'
+VIDEO = 'Video'
+WEBCAM = 'Webcam'
 
-    # Open the image using PIL and convert to a format for OpenCV
-    image = Image.open(uploaded_file)
-    image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+SOURCES_LIST = [IMAGE, VIDEO, WEBCAM]
 
-    # Perform prediction
-    results = st.session_state.yolo_model.predict(source=image_cv, conf=conf_threshold)
-    detections = results[0]
+#Image Config
+IMAGES_DIR = ROOT/'images'
+DEFAULT_IMAGE = IMAGES_DIR/'image1.jpg'
+DEFAULT_DETECT_IMAGE = IMAGES_DIR/'detectedimage1.jpg'
 
-    boxes = detections.boxes.xyxy.cpu().numpy()
-    confs = detections.boxes.conf.cpu().numpy()
-    class_ids = detections.boxes.cls.cpu().numpy().astype(int)
+#Videos Config
+VIDEO_DIR = ROOT/'videos'
+VIDEOS_DICT = {
+    'video 1': VIDEO_DIR/'video1.mp4',
+    'video 2': VIDEO_DIR/'video2.mp4'
+}
 
-    detected_classes = []
+#Webcam Config
+WEBCAM_DEFAULT_ID = 0  # Default webcam (usually the built-in webcam)
+
+#Model Configurations
+MODEL_DIR = ROOT/'weights'
+DETECTION_MODEL = MODEL_DIR/'yolo11n.pt'
+
+#In case of your custom model
+#DETECTION_MODEL = MODEL_DIR/'custom_model_weight.pt'
+
+SEGMENTATION_MODEL  = MODEL_DIR/'yolo11n-seg.pt'
+
+POSE_ESTIMATION_MODEL = MODEL_DIR/'yolo11n-pose.pt'
+
     
     # Filter detections based on selected classes
     if selected_classes:
