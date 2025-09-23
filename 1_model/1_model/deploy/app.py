@@ -165,17 +165,17 @@ with st.sidebar:
 
     uploaded_file = st.file_uploader(
         "Upload an image 📤",
-        type=["jpg", "png", "jpeg"],  # ลบ video types ออก
+        type=["jpg", "png", "jpeg"],
     )
 
-    # ลบ webcam functionality ออกทั้งหมด
-    # if st.button("Use Webcam 📷" if not st.session_state.is_webcam_active else "Stop Webcam 🛑"):
-    #     st.session_state.is_webcam_active = not st.session_state.is_webcam_active
-    #     st.session_state.is_detecting = st.session_state.is_webcam_active
+    # เพิ่ม webcam functionality กลับมา
+    if st.button("Use Webcam 📷" if not st.session_state.is_webcam_active else "Stop Webcam 🛑"):
+        st.session_state.is_webcam_active = not st.session_state.is_webcam_active
+        st.session_state.is_detecting = st.session_state.is_webcam_active
 
     detect_button = st.button(
         ("Start Detection ▶️" if not st.session_state.is_detecting else "Stop Detection 🛑"),
-        disabled=(not uploaded_file),  # ลบ webcam condition ออก
+        disabled=(not uploaded_file and not st.session_state.is_webcam_active),
     )
 
     if detect_button:
@@ -202,10 +202,20 @@ with st.sidebar:
         st.error("🗑️ **Trash:** Dispose in the **GENERAL** bin.")
 
 # ------------------------------------------------
-# Main Content - ลบ webcam functionality ออก
+# Main Content - เพิ่ม webcam functionality แบบง่าย
 # ------------------------------------------------
 if st.session_state.is_detecting:
-    if uploaded_file:
+    if st.session_state.is_webcam_active:
+        st.info("🔴 Webcam mode active - Use camera input below")
+        
+        # ใช้ st.camera_input แทน WebRTC
+        camera_image = st.camera_input("Take a picture")
+        
+        if camera_image is not None:
+            st.info("Processing camera image...")
+            image_detection(camera_image, confidence_threshold, selected_classes)
+            
+    elif uploaded_file:
         file_extension = uploaded_file.name.split(".")[-1].lower()
         if file_extension in ["jpg", "jpeg", "png"]:
             st.info("Detecting objects in image...")
@@ -214,7 +224,7 @@ if st.session_state.is_detecting:
             st.warning("Only image files are supported in this version")
 else:
     st.title("Smart Garbage Detection & Sorting Assistant")
-    st.info("Upload an image for object detection.")
+    st.info("Upload an image or activate webcam for object detection.")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -223,6 +233,7 @@ else:
         This project helps people sort garbage more easily.
 
         **Features:**
+        - Real-time webcam capture
         - Image analysis
         - Smart disposal recommendations
         - Multiple waste categories supported
@@ -231,7 +242,7 @@ else:
     with col2:
         st.write("""
         ### 📖 How to Use:
-        1. **Upload** an image 
+        1. **Upload** an image or **activate webcam**
         2. **Adjust** confidence threshold as needed
         3. **Select** specific classes to detect (optional)
         4. **Start detection** and follow the disposal instructions
