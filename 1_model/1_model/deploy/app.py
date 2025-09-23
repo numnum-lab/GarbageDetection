@@ -3,13 +3,12 @@ import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
 import numpy as np
-# ลบ streamlit_webrtc และ WebRTC-related imports ออก
-# from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-# import av
 import torch
-# ลบ functools.partial ออก (ใช้แค่สำหรับ webcam)
-# from functools import partial
+import time
 from huggingface_hub import hf_hub_download
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration
+import av
+import threading
 
 # ------------------------------------------------
 # Initial Session State
@@ -26,6 +25,9 @@ if "detected_classes" not in st.session_state:
 if "confidence_threshold" not in st.session_state:
     st.session_state.confidence_threshold = 0.2
 
+if "live_detection_active" not in st.session_state:
+    st.session_state.live_detection_active = False
+
 # ------------------------------------------------
 # Streamlit Page Configuration
 # ------------------------------------------------
@@ -33,7 +35,7 @@ st.set_page_config(
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
-    page_title="Object Detection",
+    page_title="Real-Time Object Detection",
 )
 
 # ------------------------------------------------
@@ -63,13 +65,13 @@ disposal_messages = {
 @st.cache_resource
 def load_yolo_model():
     try:
-        repo_id = "Numgfsdf/garbage-detection-model"  # เปลี่ยนเป็น repo ของคุณ
-        filename = "my_model.pt"                      # ตรวจสอบว่ามีไฟล์นี้จริง
+        repo_id = "Numgfsdf/garbage-detection-model"
+        filename = "my_model.pt"
 
-        # ดาวน์โหลดไฟล์จาก Hugging Face
+        # Download model from Hugging Face
         model_path = hf_hub_download(repo_id=repo_id, filename=filename)
-
-        # โหลดโมเดล YOLO
+        
+        # Load YOLO model
         model = YOLO(model_path)
         st.success(f"โหลด YOLO Model สำเร็จจาก {model_path}!")
         return model
@@ -77,11 +79,97 @@ def load_yolo_model():
         st.error(f"เกิดข้อผิดพลาดในการโหลด YOLO model: {e}")
         return None
 
-# โหลดโมเดลเพียงครั้งเดียว
+# Load model once
 if "yolo_model" not in st.session_state:
     st.session_state.yolo_model = load_yolo_model()
 
-# ลบ Video Processor Class ออกทั้งหมด (เพราะใช้ WebRTC)
+# Thread lock for detected classes
+lock = threading.Lock()
+
+# ------------------------------------------------
+# Real-time Video Processor Class
+# ------------------------------------------------
+class VideoTransformer(VideoTransformerBase):
+    def __init__(self):
+        self.conf_threshold = 0.2
+        self.selected_classes = []
+        self.detected_classes = []
+
+    def set_params(self, conf_threshold, selected_classes):
+        self.conf_threshold = conf_threshold
+        self.selected_classes = selected_classes
+
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        
+        if st.session_state.yolo_model is not None:
+            try:
+                # Run YOLO detection
+                results = st.session_state.yolo_model.predict(
+                    source=img, 
+                    conf=self.conf_threshold,
+                    verbose=False
+                )
+                detections = results[0]
+
+                # Extract detection data
+                if len(detections) > 0:
+                    boxes = detections.boxes.xyxy.cpu().numpy()
+                    confs = detections.boxes.conf.cpu().numpy()
+                    class_ids = detections.boxes.cls.cpu().numpy().astype(int)
+                else:
+                    boxes, confs, class_ids = [], [], []
+
+                # Filter based on selected classes
+                detected_classes = []
+                if self.selected_classes:
+                    filtered = [
+                        (box, conf, class_id)
+                        for box, conf, class_id in zip(boxes, confs, class_ids)
+                        if yolo_classes[class_id] in self.selected_classes
+                    ]
+                    if filtered:
+                        boxes, confs, class_ids = zip(*filtered)
+                        detected_classes = [yolo_classes[class_id] for class_id in class_ids]
+                    else:
+                        boxes, confs, class_ids = [], [], []
+                else:
+                    detected_classes = [yolo_classes[class_id] for class_id in class_ids]
+
+                # Draw bounding boxes and labels
+                for i, box in enumerate(boxes):
+                    x1, y1, x2, y2 = map(int, box)
+                    label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
+                    
+                    # Draw rectangle
+                    cv2.rectangle(img, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
+                    
+                    # Draw label background
+                    label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                    cv2.rectangle(img, (x1, y1 - label_size[1] - 10), 
+                                (x1 + label_size[0], y1), (0, 255, 0), -1)
+                    
+                    # Draw label text
+                    cv2.putText(
+                        img,
+                        label,
+                        (x1, y1 - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 0, 0),
+                        2,
+                    )
+
+                # Update detected classes in session state (thread-safe)
+                with lock:
+                    st.session_state.detected_classes = detected_classes
+
+            except Exception as e:
+                # Draw error message on frame
+                cv2.putText(img, f"Detection Error: {str(e)[:50]}...", 
+                          (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 # ------------------------------------------------
 # Helper Functions
@@ -168,18 +256,18 @@ with st.sidebar:
         type=["jpg", "png", "jpeg"],
     )
 
-    # เพิ่ม webcam functionality กลับมา
-    if st.button("Use Webcam 📷" if not st.session_state.is_webcam_active else "Stop Webcam 🛑"):
-        st.session_state.is_webcam_active = not st.session_state.is_webcam_active
-        st.session_state.is_detecting = st.session_state.is_webcam_active
-
-    detect_button = st.button(
-        ("Start Detection ▶️" if not st.session_state.is_detecting else "Stop Detection 🛑"),
-        disabled=(not uploaded_file and not st.session_state.is_webcam_active),
+    # Detection mode selection
+    st.subheader("Detection Mode")
+    detection_mode = st.radio(
+        "Choose detection mode:",
+        ["Single Image", "Real-time Camera"],
+        help="Single Image: Upload and analyze one image\nReal-time Camera: Live video stream with detection"
     )
 
-    if detect_button:
-        st.session_state.is_detecting = not st.session_state.is_detecting
+    # Detection control button for single image
+    if detection_mode == "Single Image" and uploaded_file:
+        if st.button("🔍 Analyze Image"):
+            st.session_state.is_detecting = True
 
     # Disposal Guide
     st.markdown("---")
@@ -202,64 +290,113 @@ with st.sidebar:
         st.error("🗑️ **Trash:** Dispose in the **GENERAL** bin.")
 
 # ------------------------------------------------
-# Main Content - เพิ่ม webcam functionality แบบง่าย
+# Main Content
 # ------------------------------------------------
+st.title("🔍 Smart Garbage Detection & Sorting Assistant")
 
-if st.session_state.is_detecting:
-    if st.session_state.is_webcam_active:
-        st.info("🔴 Webcam mode active - Use camera input below")
+# Handle different detection modes
+if detection_mode == "Real-time Camera":
+    st.info("📹 Real-time Detection Mode - Live camera stream with object detection")
+    
+    # Create columns for layout
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        # WebRTC Configuration
+        RTC_CONFIGURATION = RTCConfiguration({
+            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+        })
         
-        # ใช้ st.camera_input แทน WebRTC
-        camera_image = st.camera_input("Take a picture")
+        # Create video transformer instance
+        video_transformer = VideoTransformer()
+        video_transformer.set_params(confidence_threshold, selected_classes)
         
-        if camera_image is not None:
-            st.info("Processing camera image...")
-            image_detection(camera_image, confidence_threshold, selected_classes)
-            
-    elif uploaded_file:
+        # WebRTC streamer
+        webrtc_ctx = webrtc_streamer(
+            key="object-detection",
+            video_transformer_factory=lambda: video_transformer,
+            rtc_configuration=RTC_CONFIGURATION,
+            media_stream_constraints={
+                "video": {"width": 640, "height": 480},
+                "audio": False
+            },
+            async_processing=True,
+        )
+        
+        # Update transformer parameters when settings change
+        if webrtc_ctx.video_transformer:
+            webrtc_ctx.video_transformer.set_params(confidence_threshold, selected_classes)
+    
+    with col2:
+        # Display detection results (updates automatically)
+        st.subheader("🎯 Live Results")
+        results_placeholder = st.empty()
+        
+        # Update results every second
+        if webrtc_ctx.state.playing:
+            while webrtc_ctx.state.playing:
+                with results_placeholder.container():
+                    with lock:
+                        current_detections = st.session_state.detected_classes.copy()
+                    
+                    if current_detections:
+                        display_detection_messages(current_detections)
+                    else:
+                        st.info("👀 Looking for objects...")
+                
+                time.sleep(0.5)  # Update every 500ms
+
+elif detection_mode == "Single Image":
+    if st.session_state.is_detecting and uploaded_file:
+        # Single image detection
         file_extension = uploaded_file.name.split(".")[-1].lower()
         if file_extension in ["jpg", "jpeg", "png"]:
-            st.info("Detecting objects in image...")
+            st.info("🔍 Detecting objects in uploaded image...")
             image_detection(uploaded_file, confidence_threshold, selected_classes)
+            st.session_state.is_detecting = False  # Reset after single image processing
         else:
-            st.warning("Only image files are supported in this version")
-else:
-    st.title("Smart Garbage Detection & Sorting Assistant")
-    st.info("Upload an image or activate webcam for object detection.")
+            st.warning("⚠️ Only image files (JPG, PNG, JPEG) are supported")
+    else:
+        # Welcome screen
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("""
+            ### 🗂️ Garbage Detection Using YOLO
+            This project helps people sort garbage more easily using AI-powered object detection.
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write("""
-        ### 🗂️ Garbage Detection Using YOLO
-        This project helps people sort garbage more easily.
+            **Features:**
+            - 📹 **Real-time camera detection**
+            - 🖼️ Single image analysis
+            - 🎯 Smart disposal recommendations
+            - 🗑️ Multiple waste categories supported
+            """)
 
-        **Features:**
-        - Real-time webcam capture
-        - Image analysis
-        - Smart disposal recommendations
-        - Multiple waste categories supported
-        """)
+        with col2:
+            st.write("""
+            ### 📖 How to Use:
+            1. **Choose** detection mode in the sidebar
+            2. **Upload** an image or use real-time camera
+            3. **Adjust** confidence threshold as needed
+            4. **Select** specific classes to detect (optional)
+            5. **Start detection** and follow the disposal instructions
 
-    with col2:
-        st.write("""
-        ### 📖 How to Use:
-        1. **Upload** an image or **activate webcam**
-        2. **Adjust** confidence threshold as needed
-        3. **Select** specific classes to detect (optional)
-        4. **Start detection** and follow the disposal instructions
+            The system will automatically provide disposal guidance for detected items!
+            """)
 
-        The system will automatically provide disposal guidance for detected items!
-        """)
-    cam = cv2.VideoCapture(0)
-    cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    FRAME_WINDOW = st.image([])
-    
-    while True:
-        ret, frame = cam.read()
-        if not ret:
-            st.error("Failed to capture frame from camera")
-            st.info("Please turn off the other app that is using the camera and restart app")
-            st.stop()
-        image, name, id = image_detection(frame)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # Display sample images or instructions
+        st.info("👈 Choose your detection mode from the sidebar to get started!")
+
+# ------------------------------------------------
+# Installation Instructions
+# ------------------------------------------------
+if st.sidebar.button("📦 Show Installation Instructions"):
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Installation Required")
+    st.sidebar.code("""
+pip install streamlit-webrtc
+pip install opencv-python
+pip install ultralytics
+pip install torch
+pip install huggingface_hub
+    """)
+    st.sidebar.info("Install these packages to run real-time detection!")
