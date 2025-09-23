@@ -5,3 +5,5 @@ Pillow
 numpy
 torch>=1.8.0
 huggingface-hub
+av
+streamlit-webrtc
