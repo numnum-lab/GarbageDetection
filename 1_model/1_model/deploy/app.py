@@ -1,12 +1,15 @@
 import cv2
 import streamlit as st
 from ultralytics import YOLO
+import tempfile
 from PIL import Image
 import numpy as np
+import sys
 from pathlib import Path
+import os
 import torch
 from ultralytics.nn.tasks import DetectionModel
-import base64
+import threading
 import time
 
 # Set page config first
@@ -36,7 +39,7 @@ disposal_messages = {
     "trash": "🗑️ **General trash detected!** Dispose in the **GENERAL** bin.",
 }
 
-# Color mapping for different waste types (BGR format for OpenCV)
+# Color mapping for different waste types
 color_mapping = {
     "battery": (0, 0, 255),      # Red - Hazardous
     "biological": (0, 255, 0),   # Green - Organic
@@ -57,8 +60,10 @@ if "confidence_threshold" not in st.session_state:
     st.session_state.confidence_threshold = 0.25
 if "detected_objects" not in st.session_state:
     st.session_state.detected_objects = []
-if "capture_key" not in st.session_state:
-    st.session_state.capture_key = 0
+if "camera_thread" not in st.session_state:
+    st.session_state.camera_thread = None
+if "stop_camera" not in st.session_state:
+    st.session_state.stop_camera = False
 
 # Load YOLO model
 @st.cache_resource
@@ -103,7 +108,7 @@ def load_yolo_model():
 def display_detection_messages(detected_classes):
     """Display disposal messages for detected objects with color coding"""
     if detected_classes:
-        st.subheader("🎯 Detection Results:")
+        st.subheader("🎯 Real-time Detection Results:")
         unique_classes = list(set(detected_classes))
         
         # Create columns based on number of detected classes
@@ -170,122 +175,72 @@ def process_frame_with_yolo(frame, model, conf_threshold, selected_classes=None)
     
     return frame, detected_classes
 
-def create_camera_interface():
-    """Create HTML/JavaScript interface for camera access"""
+def camera_loop(model, conf_threshold, selected_classes, placeholder, detection_placeholder):
+    """Main camera loop for real-time detection"""
+    cap = cv2.VideoCapture(0)
     
-    camera_html = f"""
-    <div style="text-align: center; padding: 20px; background: #f0f2f6; border-radius: 10px; margin: 10px 0;">
-        <h3>📹 Camera Interface</h3>
-        <video id="video" width="640" height="480" autoplay style="border: 2px solid #ddd; border-radius: 10px;"></video>
-        <br><br>
-        <button id="startBtn" onclick="startCamera()" style="background: #ff4b4b; color: white; border: none; padding: 10px 20px; border-radius: 5px; margin: 5px; cursor: pointer;">
-            🚀 Start Camera
-        </button>
-        <button id="captureBtn" onclick="captureFrame()" style="background: #00cc88; color: white; border: none; padding: 10px 20px; border-radius: 5px; margin: 5px; cursor: pointer;">
-            📸 Capture & Analyze
-        </button>
-        <button id="stopBtn" onclick="stopCamera()" style="background: #888; color: white; border: none; padding: 10px 20px; border-radius: 5px; margin: 5px; cursor: pointer;">
-            🛑 Stop Camera
-        </button>
-        <br><br>
-        <canvas id="canvas" width="640" height="480" style="display: none;"></canvas>
-        <div id="status" style="margin-top: 10px; font-weight: bold;">📱 Click "Start Camera" to begin</div>
-    </div>
-
-    <script>
-    let video = document.getElementById('video');
-    let canvas = document.getElementById('canvas');
-    let ctx = canvas.getContext('2d');
-    let stream = null;
-    let capturing = false;
-
-    async function startCamera() {{
-        try {{
-            stream = await navigator.mediaDevices.getUserMedia({{ 
-                video: {{ 
-                    width: 640, 
-                    height: 480,
-                    facingMode: 'environment'  // Try to use back camera on mobile
-                }} 
-            }});
-            video.srcObject = stream;
-            document.getElementById('status').innerHTML = '🟢 Camera Active - Click "Capture & Analyze" to detect objects';
-            document.getElementById('startBtn').style.background = '#888';
-            document.getElementById('captureBtn').style.background = '#00cc88';
-            document.getElementById('stopBtn').style.background = '#ff4b4b';
-        }} catch (err) {{
-            console.error('Error accessing camera: ', err);
-            document.getElementById('status').innerHTML = '❌ Camera access denied. Please allow camera permissions and refresh the page.';
-        }}
-    }}
-
-    function captureFrame() {{
-        if (stream && !capturing) {{
-            capturing = true;
-            ctx.drawImage(video, 0, 0, 640, 480);
-            let imageData = canvas.toDataURL('image/jpeg', 0.8);
-            
-            // Send image data to Streamlit
-            window.parent.postMessage({{
-                type: 'captured_frame',
-                data: imageData,
-                timestamp: Date.now()
-            }}, '*');
-            
-            document.getElementById('status').innerHTML = '🔄 Processing image...';
-            
-            setTimeout(() => {{
-                capturing = false;
-                document.getElementById('status').innerHTML = '🟢 Ready for next capture';
-            }}, 2000);
-        }}
-    }}
-
-    function stopCamera() {{
-        if (stream) {{
-            stream.getTracks().forEach(track => track.stop());
-            stream = null;
-            video.srcObject = null;
-            document.getElementById('status').innerHTML = '🔴 Camera stopped';
-            document.getElementById('startBtn').style.background = '#ff4b4b';
-            document.getElementById('captureBtn').style.background = '#888';
-            document.getElementById('stopBtn').style.background = '#888';
-        }}
-    }}
-
-    // Auto-capture for continuous detection (optional)
-    let autoCaptureInterval = null;
+    # Set camera properties for better performance
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 30)
     
-    function toggleAutoCaptureMode() {{
-        if (autoCaptureInterval) {{
-            clearInterval(autoCaptureInterval);
-            autoCaptureInterval = null;
-            document.getElementById('status').innerHTML = '🟢 Manual mode - Click capture to analyze';
-        }} else {{
-            autoCaptureInterval = setInterval(() => {{
-                if (stream && !capturing) {{
-                    captureFrame();
-                }}
-            }}, 3000); // Capture every 3 seconds
-            document.getElementById('status').innerHTML = '🔄 Auto-capture mode - Analyzing every 3 seconds';
-        }}
-    }}
-    </script>
-    """
+    if not cap.isOpened():
+        st.error("❌ Could not open camera. Please check if your camera is connected and not being used by another application.")
+        return
     
-    return camera_html
+    fps_counter = 0
+    start_time = time.time()
+    
+    while st.session_state.camera_active and not st.session_state.stop_camera:
+        ret, frame = cap.read()
+        if not ret:
+            st.error("❌ Failed to capture frame from camera")
+            break
+        
+        # Flip frame horizontally for mirror effect
+        frame = cv2.flip(frame, 1)
+        
+        # Process frame with YOLO
+        processed_frame, detected_classes = process_frame_with_yolo(
+            frame, model, conf_threshold, selected_classes
+        )
+        
+        # Update detected objects in session state
+        st.session_state.detected_objects = detected_classes
+        
+        # Convert BGR to RGB for Streamlit
+        frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+        
+        # Calculate and display FPS
+        fps_counter += 1
+        if fps_counter % 30 == 0:  # Update FPS every 30 frames
+            current_time = time.time()
+            fps = 30 / (current_time - start_time)
+            start_time = current_time
+            
+        # Add FPS to frame
+        cv2.putText(processed_frame, f"FPS: {fps:.1f}" if 'fps' in locals() else "FPS: --", 
+                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        # Update the display
+        placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
+        
+        # Update detection messages
+        with detection_placeholder.container():
+            if detected_classes:
+                display_detection_messages(detected_classes)
+            else:
+                st.info("👁️ Looking for objects...")
+        
+        # Small delay to prevent overwhelming the UI
+        time.sleep(0.033)  # ~30 FPS
+    
+    cap.release()
+    st.session_state.camera_active = False
 
 def image_detection(uploaded_file, model, conf_threshold, selected_classes):
     """Process uploaded image"""
-    if isinstance(uploaded_file, str) and uploaded_file.startswith('data:image'):
-        # Handle base64 image data from camera
-        header, data = uploaded_file.split(',', 1)
-        image_data = base64.b64decode(data)
-        image = Image.open(io.BytesIO(image_data))
-    else:
-        # Handle uploaded file
-        image = Image.open(uploaded_file)
-    
+    image = Image.open(uploaded_file)
     image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
     
     processed_image, detected_classes = process_frame_with_yolo(
@@ -336,35 +291,28 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Camera mode selection
-    st.subheader("📹 Detection Mode")
-    detection_mode = st.radio(
-        "Choose detection method:",
-        ["📸 Image Upload", "🎥 Live Camera"],
-        index=1 if st.session_state.camera_active else 0
-    )
+    # Camera controls
+    st.subheader("📹 Camera Controls")
     
-    if detection_mode == "🎥 Live Camera":
-        st.session_state.camera_active = True
+    if not st.session_state.camera_active:
+        if st.button("🚀 Start Real-time Detection", type="primary", use_container_width=True):
+            if yolo_model is not None:
+                st.session_state.camera_active = True
+                st.session_state.stop_camera = False
+                st.rerun()
+            else:
+                st.error("Cannot start camera: YOLO model not loaded")
     else:
-        st.session_state.camera_active = False
+        if st.button("🛑 Stop Detection", type="secondary", use_container_width=True):
+            st.session_state.camera_active = False
+            st.session_state.stop_camera = True
+            st.rerun()
     
-    # Instructions
-    with st.expander("📖 How to use Camera"):
-        st.markdown("""
-        ### 🎯 Camera Instructions:
-        1. **Click "Start Camera"** - Browser will ask for camera permission
-        2. **Allow camera access** when prompted
-        3. **Point camera at objects** you want to detect
-        4. **Click "Capture & Analyze"** to detect objects in the current frame
-        5. **Use "Stop Camera"** when finished
-        
-        ### 🔧 Troubleshooting:
-        - **No camera prompt?** Try refreshing the page
-        - **Camera blocked?** Check browser settings and allow camera access
-        - **Blurry image?** Ensure good lighting and stable camera
-        - **No detection?** Lower the confidence threshold
-        """)
+    # Status indicator
+    if st.session_state.camera_active:
+        st.success("🟢 Camera Active")
+    else:
+        st.info("🔴 Camera Inactive")
     
     # Disposal Guide
     st.markdown("---")
@@ -401,43 +349,20 @@ if yolo_model is None:
 
 # Main application logic
 if st.session_state.camera_active:
-    st.info("🎥 **Camera Detection Mode** - Use the camera interface below to capture and analyze images!")
+    st.info("🎥 **Real-time detection active** - Objects will be detected and classified in real-time!")
     
-    # Display camera interface
-    camera_interface = create_camera_interface()
-    st.components.v1.html(camera_interface, height=650)
+    # Create placeholders for video feed and detection results
+    video_placeholder = st.empty()
+    detection_placeholder = st.empty()
     
-    # Add JavaScript to handle captured frames
-    st.markdown("""
-    <script>
-    window.addEventListener('message', function(event) {
-        if (event.data.type === 'captured_frame') {
-            // Store the captured image data
-            sessionStorage.setItem('captured_frame', event.data.data);
-            sessionStorage.setItem('capture_timestamp', event.data.timestamp);
-            
-            // Trigger a rerun by clicking a hidden button
-            const button = document.querySelector('[data-testid="baseButton-secondary"]');
-            if (button) button.click();
-        }
-    });
-    </script>
-    """, unsafe_allow_html=True)
-    
-    # Add a hidden button to trigger rerun
-    if st.button("🔄 Process Captured Image", key="process_capture", type="secondary"):
-        st.rerun()
-    
-    # Check for captured frame data
-    st.markdown("""
-    <script>
-    const capturedFrame = sessionStorage.getItem('captured_frame');
-    if (capturedFrame) {
-        // Display processing message
-        document.write('<div style="background: #e1f5fe; padding: 10px; border-radius: 5px; margin: 10px 0;"><strong>🔄 Processing captured image...</strong></div>');
-    }
-    </script>
-    """, unsafe_allow_html=True)
+    # Start camera in a separate thread
+    if st.session_state.camera_thread is None or not st.session_state.camera_thread.is_alive():
+        st.session_state.camera_thread = threading.Thread(
+            target=camera_loop,
+            args=(yolo_model, confidence_threshold, selected_classes, video_placeholder, detection_placeholder),
+            daemon=True
+        )
+        st.session_state.camera_thread.start()
 
 elif uploaded_file:
     st.info("📸 **Image Detection Mode** - Analyzing uploaded image...")
@@ -451,29 +376,20 @@ else:
         st.markdown("""
         ## 🚀 Welcome to Smart Garbage Detection!
         
-        This advanced AI system helps you sort waste properly using object detection.
+        This advanced AI system helps you sort waste properly using real-time object detection.
         
         ### ✨ Features:
-        - **Live camera detection** with browser camera access
+        - **Real-time camera detection** with live video feed
         - **Image analysis** for uploaded photos  
         - **Smart disposal recommendations** for detected items
         - **Color-coded classification** system
         - **High-performance YOLOv11** model
         
         ### 🎯 How to Use:
-        1. **Camera Mode**: Select "Live Camera" and use the camera interface
-        2. **Upload Mode**: Upload an image using the file uploader
+        1. **Real-time Detection**: Click "Start Real-time Detection" to use your camera
+        2. **Image Analysis**: Upload an image using the sidebar
         3. **Adjust Settings**: Fine-tune confidence threshold and select specific classes
         4. **Follow Instructions**: Get instant disposal guidance for detected objects
-        """)
-        
-        # Quick start guide
-        st.success("""
-        💡 **Quick Start for Camera:**
-        1. Select "Live Camera" in the sidebar
-        2. Click "Start Camera" in the interface
-        3. Allow camera access when prompted by browser
-        4. Point camera at objects and click "Capture & Analyze"
         """)
     
     with col2:
@@ -511,14 +427,6 @@ st.markdown("""
         padding: 1rem 0;
         border-bottom: 2px solid #f0f2f6;
         margin-bottom: 2rem;
-    }
-    div[data-testid="column"] {
-        padding: 0.5rem;
-    }
-    
-    /* Hide the process button initially */
-    button[kind="secondary"] {
-        display: none;
     }
 </style>
 """, unsafe_allow_html=True)
