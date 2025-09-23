@@ -59,18 +59,26 @@ disposal_messages = {
 @st.cache_resource
 def load_yolo_model():
     try:
-        repo_id = "Numgfsdf/garbage-detection-model"  # เปลี่ยนเป็น repo ของคุณ
-        filename = "my_model.pt"                      # ตรวจสอบว่ามีไฟล์นี้จริง
+        repo_id = "Numgfsdf/garbage-detection-model"  
+        filename = "my_model.pt"                      
 
-        # ดาวน์โหลดไฟล์จาก Hugging Face
-        model_path = hf_hub_download(repo_id=repo_id, filename=filename)
+        # Add timeout and better error handling for deployed environments
+        model_path = hf_hub_download(
+            repo_id=repo_id, 
+            filename=filename,
+            cache_dir="./model_cache"  # Use local cache directory
+        )
 
-        # โหลดโมเดล YOLO
+        # Load model with CPU/GPU detection
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
         model = YOLO(model_path)
-        st.success(f"โหลด YOLO Model สำเร็จจาก {model_path}!")
+        model.to(device)
+        
+        st.success(f"โหลด YOLO Model สำเร็จจาก {model_path} on {device}!")
         return model
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการโหลด YOLO model: {e}")
+        st.info("This might be due to network issues or model availability. Please try again later.")
         return None
 
 # โหลดโมเดลเพียงครั้งเดียว
@@ -109,54 +117,71 @@ def image_detection(uploaded_file, conf_threshold, selected_classes):
         st.error("YOLO model is not loaded. Cannot perform image detection.")
         return
 
-    image = Image.open(uploaded_file)
-    image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    try:
+        image = Image.open(uploaded_file)
+        image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
-    results = st.session_state.yolo_model.predict(source=image_cv, conf=conf_threshold)
-    detections = results[0]
+        # Add progress bar for better UX
+        with st.spinner('Processing image...'):
+            results = st.session_state.yolo_model.predict(source=image_cv, conf=conf_threshold)
+            detections = results[0]
 
-    boxes = detections.boxes.xyxy.cpu().numpy()
-    confs = detections.boxes.conf.cpu().numpy()
-    class_ids = detections.boxes.cls.cpu().numpy().astype(int)
+        boxes = detections.boxes.xyxy.cpu().numpy() if len(detections.boxes) > 0 else np.array([])
+        confs = detections.boxes.conf.cpu().numpy() if len(detections.boxes) > 0 else np.array([])
+        class_ids = detections.boxes.cls.cpu().numpy().astype(int) if len(detections.boxes) > 0 else np.array([])
 
-    detected_classes = []
-    if selected_classes:
-        filtered = [
-            (box, conf, class_id)
-            for box, conf, class_id in zip(boxes, confs, class_ids)
-            if yolo_classes[class_id] in selected_classes
-        ]
-        if filtered:
-            boxes, confs, class_ids = zip(*filtered)
-            detected_classes = [yolo_classes[class_id] for class_id in class_ids]
+        detected_classes = []
+        if selected_classes:
+            filtered = [
+                (box, conf, class_id)
+                for box, conf, class_id in zip(boxes, confs, class_ids)
+                if yolo_classes[class_id] in selected_classes
+            ]
+            if filtered:
+                boxes, confs, class_ids = zip(*filtered)
+                detected_classes = [yolo_classes[class_id] for class_id in class_ids]
+            else:
+                boxes, confs, class_ids = [], [], []
         else:
-            boxes, confs, class_ids = [], [], []
-    else:
-        detected_classes = [yolo_classes[class_id] for class_id in class_ids]
+            detected_classes = [yolo_classes[class_id] for class_id in class_ids]
 
-    for i, box in enumerate(boxes):
-        x1, y1, x2, y2 = map(int, box)
-        label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
-        cv2.rectangle(image_cv, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
-        cv2.putText(image_cv, label, (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        for i, box in enumerate(boxes):
+            x1, y1, x2, y2 = map(int, box)
+            label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
+            cv2.rectangle(image_cv, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
+            cv2.putText(image_cv, label, (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.image(image_cv, channels="BGR")
-    with col2:
-        display_detection_messages(detected_classes)
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.image(image_cv, channels="BGR")
+        with col2:
+            display_detection_messages(detected_classes)
+            
+    except Exception as e:
+        st.error(f"Error processing image: {str(e)}")
+        st.info("Please try uploading a different image or check your internet connection.")
 
 # Function for live object detection using webcam
 def live_streaming(conf_threshold, selected_classes):
+    # Check if running in deployed environment
+    import os
+    if os.getenv('STREAMLIT_SHARING') or os.getenv('HEROKU') or os.getenv('RAILWAY'):
+        st.error("⚠️ Webcam functionality is not available in deployed environments. Please use image upload instead.")
+        return
+        
     stframe = st.empty()
     message_container = st.empty()
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        st.error(
-            "Error: Could not access the webcam. Please make sure your webcam is working."
-        )
+    try:
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            st.error(
+                "Error: Could not access the webcam. Please make sure your webcam is working."
+            )
+            return
+    except Exception as e:
+        st.error(f"Webcam not available in this environment: {str(e)}")
         return
 
     try:
@@ -315,10 +340,16 @@ with st.sidebar:
         type=["jpg", "png", "jpeg", "mp4", "avi", "mov"],
     )
 
-    # Webcam functionality
-    if st.button("Use Webcam 📷" if not st.session_state.is_webcam_active else "Stop Webcam 🛑"):
-        st.session_state.is_webcam_active = not st.session_state.is_webcam_active
-        st.session_state.is_detecting = st.session_state.is_webcam_active
+    # Webcam functionality - disable in deployed environments
+    import os
+    webcam_available = not (os.getenv('STREAMLIT_SHARING') or os.getenv('HEROKU') or os.getenv('RAILWAY'))
+    
+    if webcam_available:
+        if st.button("Use Webcam 📷" if not st.session_state.is_webcam_active else "Stop Webcam 🛑"):
+            st.session_state.is_webcam_active = not st.session_state.is_webcam_active
+            st.session_state.is_detecting = st.session_state.is_webcam_active
+    else:
+        st.info("📱 Webcam not available in deployed environment. Use image/video upload instead.")
 
     detect_button = st.button(
         ("Start Detection ▶️" if not st.session_state.is_detecting else "Stop Detection 🛑"),
