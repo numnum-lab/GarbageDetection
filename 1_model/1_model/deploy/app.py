@@ -13,6 +13,9 @@ import torch
 from ultralytics.nn.tasks import DetectionModel
 from functools import partial
 from huggingface_hub import hf_hub_download
+
+RerunData(query_string='linkgarbagedetection-nkpsyqwrb5rsuedny3uzg4.streamlit.app', is_fragment_scoped_rerun=True)
+
 if "is_webcam_active" not in st.session_state:
     st.session_state.is_webcam_active = False
 
@@ -58,7 +61,6 @@ disposal_messages = {
 @st.cache_resource
 def load_yolo_model():
     try:
-        st.info("กำลังดาวน์โหลดและโหลดโมเดลจาก Hugging Face...")
         
         # ✅ แก้ไข: ใส่ชื่อ repo_id และ filename ของคุณที่ถูกต้อง
         repo_id = "Numgfsdf/garbage-detection-model"
