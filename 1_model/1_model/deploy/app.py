@@ -3,13 +3,10 @@ import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
 import numpy as np
-# ลบ streamlit_webrtc และ WebRTC-related imports ออก
-# from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-# import av
-import torch
-# ลบ functools.partial ออก (ใช้แค่สำหรับ webcam)
-# from functools import partial
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
+import av
 from huggingface_hub import hf_hub_download
+import torch
 
 # ------------------------------------------------
 # Initial Session State
@@ -19,9 +16,6 @@ if "is_webcam_active" not in st.session_state:
 
 if "is_detecting" not in st.session_state:
     st.session_state.is_detecting = False
-
-if "detected_classes" not in st.session_state:
-    st.session_state.detected_classes = []
 
 if "confidence_threshold" not in st.session_state:
     st.session_state.confidence_threshold = 0.2
@@ -33,7 +27,7 @@ st.set_page_config(
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
-    page_title="Object Detection",
+    page_title="Smart Garbage Detection",
 )
 
 # ------------------------------------------------
@@ -62,62 +56,98 @@ disposal_messages = {
 # ------------------------------------------------
 @st.cache_resource
 def load_yolo_model():
+    """
+    Loads the YOLO model from a Hugging Face repository and caches it.
+    """
     try:
-        repo_id = "Numgfsdf/garbage-detection-model"  # เปลี่ยนเป็น repo ของคุณ
-        filename = "my_model.pt"                      # ตรวจสอบว่ามีไฟล์นี้จริง
-
-        # ดาวน์โหลดไฟล์จาก Hugging Face
+        repo_id = "Numgfsdf/garbage-detection-model"
+        filename = "my_model.pt"
+        
+        # Download the file from Hugging Face
         model_path = hf_hub_download(repo_id=repo_id, filename=filename)
 
-        # โหลดโมเดล YOLO
+        # Load the YOLO model
         model = YOLO(model_path)
-        st.success(f"โหลด YOLO Model สำเร็จจาก {model_path}!")
+        st.success(f"YOLO Model loaded successfully from {model_path}!")
         return model
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการโหลด YOLO model: {e}")
+        st.error(f"Error loading YOLO model: {e}")
         return None
 
-# โหลดโมเดลเพียงครั้งเดียว
+# Load the model only once
 if "yolo_model" not in st.session_state:
     st.session_state.yolo_model = load_yolo_model()
 
-# ลบ Video Processor Class ออกทั้งหมด (เพราะใช้ WebRTC)
+# ------------------------------------------------
+# Video Processor for Webcam
+# ------------------------------------------------
+class VideoProcessor(VideoProcessorBase):
+    """
+    Processes video frames from the webcam for object detection.
+    """
+    def __init__(self):
+        # We access the model from Streamlit's session state
+        self.model = st.session_state.yolo_model
+        # We access the confidence threshold from Streamlit's session state
+        self.confidence = st.session_state.confidence_threshold
 
+    def recv(self, frame):
+        # Convert the frame to a format YOLO can use
+        image = frame.to_ndarray(format="bgr24")
+
+        # Perform detection using the model
+        if self.model:
+            results = self.model.predict(source=image, conf=self.confidence)
+            # Draw bounding boxes and labels on the frame
+            annotated_image = results[0].plot()
+            # Return the annotated frame
+            return av.VideoFrame.from_ndarray(annotated_image, format="bgr24")
+        
+        # If model is not loaded, return the original frame
+        return frame
+        
 # ------------------------------------------------
 # Helper Functions
 # ------------------------------------------------
 def display_detection_messages(detected_classes):
+    """
+    Displays the disposal messages for detected objects.
+    """
     if detected_classes:
         st.subheader("🎯 Detection Results:")
         unique_classes = list(set(detected_classes))
-
-        if len(unique_classes) <= 2:
-            cols = st.columns(len(unique_classes))
-        else:
-            cols = st.columns(2)
-
+        
+        # Determine the number of columns to use
+        cols = st.columns(min(len(unique_classes), 2))
+        
         for i, class_name in enumerate(unique_classes):
-            col_index = i if len(unique_classes) <= 2 else i % 2
-            with cols[col_index]:
+            with cols[i % 2]:
+                message = disposal_messages.get(class_name, "🗑️ **Unknown item:** Dispose in the **GENERAL** bin.")
+                
                 if class_name == "battery":
-                    st.error(f"🟥 {disposal_messages[class_name]}")
+                    st.error(f"🟥 {message}")
                 elif class_name == "biological":
-                    st.success(f"🟢 {disposal_messages[class_name]}")
+                    st.success(f"🟢 {message}")
                 elif class_name in ["cardboard", "glass", "metal", "paper", "plastic"]:
-                    st.warning(f"🟡 {disposal_messages[class_name]}")
+                    st.warning(f"🟡 {message}")
                 elif class_name in ["clothes", "shoes"]:
-                    st.info(f"🟦 {disposal_messages[class_name]}")
+                    st.info(f"🟦 {message}")
                 else:
-                    st.error(f"⬛ {disposal_messages[class_name]}")
+                    st.error(f"⬛ {message}")
 
 def image_detection(uploaded_file, conf_threshold, selected_classes):
+    """
+    Handles object detection for an uploaded image.
+    """
     if not st.session_state.yolo_model:
         st.error("YOLO model is not loaded. Cannot perform image detection.")
         return
 
+    # Open the image using PIL and convert to a format for OpenCV
     image = Image.open(uploaded_file)
     image_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
+    # Perform prediction
     results = st.session_state.yolo_model.predict(source=image_cv, conf=conf_threshold)
     detections = results[0]
 
@@ -126,20 +156,20 @@ def image_detection(uploaded_file, conf_threshold, selected_classes):
     class_ids = detections.boxes.cls.cpu().numpy().astype(int)
 
     detected_classes = []
+    
+    # Filter detections based on selected classes
     if selected_classes:
-        filtered = [
+        filtered_results = [
             (box, conf, class_id)
             for box, conf, class_id in zip(boxes, confs, class_ids)
             if yolo_classes[class_id] in selected_classes
         ]
-        if filtered:
-            boxes, confs, class_ids = zip(*filtered)
-            detected_classes = [yolo_classes[class_id] for class_id in class_ids]
-        else:
-            boxes, confs, class_ids = [], [], []
+        boxes, confs, class_ids = zip(*filtered_results) if filtered_results else ([], [], [])
+        detected_classes = [yolo_classes[class_id] for class_id in class_ids]
     else:
         detected_classes = [yolo_classes[class_id] for class_id in class_ids]
 
+    # Draw bounding boxes on the image
     for i, box in enumerate(boxes):
         x1, y1, x2, y2 = map(int, box)
         label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
@@ -158,20 +188,25 @@ def image_detection(uploaded_file, conf_threshold, selected_classes):
 # ------------------------------------------------
 with st.sidebar:
     st.title("Object Detection Settings ⚙️")
-    confidence_threshold = st.slider("Confidence Threshold", 0.0, 1.0, 0.2)
+    
+    # Sliders and selectors for user input
+    confidence_threshold = st.slider("Confidence Threshold", 0.0, 1.0, 0.2, 0.05)
     st.session_state.confidence_threshold = confidence_threshold
 
-    selected_classes = st.multiselect("Select classes for object detection", yolo_classes)
+    selected_classes = st.multiselect("Select classes to detect", yolo_classes)
 
     uploaded_file = st.file_uploader(
         "Upload an image 📤",
         type=["jpg", "png", "jpeg"],
     )
 
-    # เพิ่ม webcam functionality กลับมา
-    if st.button("Use Webcam 📷" if not st.session_state.is_webcam_active else "Stop Webcam 🛑"):
+    # Buttons to control detection modes
+    webcam_button_text = "Stop Webcam 🛑" if st.session_state.is_webcam_active else "Use Webcam 📷"
+    if st.button(webcam_button_text):
         st.session_state.is_webcam_active = not st.session_state.is_webcam_active
-        st.session_state.is_detecting = st.session_state.is_webcam_active
+        # Reset detection state when switching modes
+        if not st.session_state.is_webcam_active:
+            st.session_state.is_detecting = False
 
     detect_button = st.button(
         ("Start Detection ▶️" if not st.session_state.is_detecting else "Stop Detection 🛑"),
@@ -180,6 +215,8 @@ with st.sidebar:
 
     if detect_button:
         st.session_state.is_detecting = not st.session_state.is_detecting
+        if not st.session_state.is_webcam_active:
+            st.session_state.is_webcam_active = False
 
     # Disposal Guide
     st.markdown("---")
@@ -202,36 +239,33 @@ with st.sidebar:
         st.error("🗑️ **Trash:** Dispose in the **GENERAL** bin.")
 
 # ------------------------------------------------
-# Main Content - เพิ่ม webcam functionality แบบง่าย
+# Main Content
 # ------------------------------------------------
+st.title("Smart Garbage Detection & Sorting Assistant")
+
 if st.session_state.is_detecting:
     if st.session_state.is_webcam_active:
-        st.info("🔴 Webcam mode active - Use camera input below")
+        st.info("🔴 Webcam mode active - Detecting objects in real-time.")
         
-        cap = cv2.VideoCapture(tfile.name)
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-            results = model(frame)
-            annotated_frame = results[0].plot()
-            stframe.image(annotated_frame, channels="BGR")
+        # Use streamlit-webrtc for live video stream
+        webrtc_streamer(
+            key="webrtc",
+            video_processor_factory=VideoProcessor,
+            rtc_configuration=RTCConfiguration(
+                {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+            ),
+        )
+        st.warning("Please allow webcam access in your browser.")
         
-        if camera_image is not None:
-            st.info("Processing camera image...")
-            image_detection(camera_image, confidence_threshold, selected_classes)
-            
     elif uploaded_file:
         file_extension = uploaded_file.name.split(".")[-1].lower()
         if file_extension in ["jpg", "jpeg", "png"]:
             st.info("Detecting objects in image...")
             image_detection(uploaded_file, confidence_threshold, selected_classes)
         else:
-            st.warning("Only image files are supported in this version")
+            st.warning("Only image files are supported in this version.")
 else:
-    st.title("Smart Garbage Detection & Sorting Assistant")
     st.info("Upload an image or activate webcam for object detection.")
-
     col1, col2 = st.columns(2)
     with col1:
         st.write("""
@@ -248,10 +282,10 @@ else:
     with col2:
         st.write("""
         ### 📖 How to Use:
-        1. **Upload** an image or **activate webcam**
-        2. **Adjust** confidence threshold as needed
-        3. **Select** specific classes to detect (optional)
-        4. **Start detection** and follow the disposal instructions
+        1. **Upload** an image or **activate webcam** from the sidebar.
+        2. **Adjust** confidence threshold as needed.
+        3. **Select** specific classes to detect (optional).
+        4. **Start detection** and follow the disposal instructions.
 
         The system will automatically provide disposal guidance for detected items!
         """)
