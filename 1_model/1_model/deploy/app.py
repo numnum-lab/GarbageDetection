@@ -19,7 +19,7 @@ st.set_page_config(
 
 # YOLO classes and messages (same as before)
 yolo_classes = [
-    "battery", "biological", "cardboard", "clothes", "glass", 
+    "battery", "biological", "cardboard", "clothes", "glass",
     "metal", "paper", "plastic", "shoes", "trash"
 ]
 
@@ -95,7 +95,6 @@ if "yolo_model" not in st.session_state:
                         st.session_state.yolo_model = YOLO('yolov8n.pt')
                         st.warning("⚠️ Using default YOLOv8n model (COCO classes, not garbage classes)")
                         # Update classes for default model
-                        global yolo_classes
                         yolo_classes = ["person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat"][:10]
                     except Exception as e3:
                         st.error(f"All methods failed: {e3}")
