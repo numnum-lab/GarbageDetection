@@ -3,10 +3,12 @@ import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
 import numpy as np
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
-import av
+# ลบ streamlit_webrtc และ WebRTC-related imports ออก
+# from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
+# import av
 import torch
-from functools import partial
+# ลบ functools.partial ออก (ใช้แค่สำหรับ webcam)
+# from functools import partial
 from huggingface_hub import hf_hub_download
 
 # ------------------------------------------------
@@ -79,41 +81,7 @@ def load_yolo_model():
 if "yolo_model" not in st.session_state:
     st.session_state.yolo_model = load_yolo_model()
 
-# ------------------------------------------------
-# Video Processor Class
-# ------------------------------------------------
-class YOLOProcessor(VideoProcessorBase):
-    def __init__(self, yolo_model, conf_threshold):
-        self.model = yolo_model
-        self.conf_threshold = conf_threshold
-
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-
-        # ทำการ predict
-        results = self.model.predict(source=img, conf=self.conf_threshold)
-        detections = results[0]
-
-        boxes = detections.boxes.xyxy.cpu().numpy() if len(detections) > 0 else []
-        confs = detections.boxes.conf.cpu().numpy() if len(detections) > 0 else []
-        class_ids = detections.boxes.cls.cpu().numpy().astype(int) if len(detections) > 0 else []
-
-        detected_classes = [yolo_classes[int(cls_id)] for cls_id in class_ids]
-
-        if detected_classes:
-            st.session_state['detected_classes'] = detected_classes
-        else:
-            st.session_state['detected_classes'] = []
-
-        # วาดกล่องรอบวัตถุ
-        for i, box in enumerate(boxes):
-            x1, y1, x2, y2 = map(int, box)
-            label = f"{yolo_classes[class_ids[i]]}: {confs[i]:.2f}"
-            cv2.rectangle(img, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
-            cv2.putText(img, label, (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
+# ลบ Video Processor Class ออกทั้งหมด (เพราะใช้ WebRTC)
 
 # ------------------------------------------------
 # Helper Functions
@@ -196,17 +164,18 @@ with st.sidebar:
     selected_classes = st.multiselect("Select classes for object detection", yolo_classes)
 
     uploaded_file = st.file_uploader(
-        "Upload an image or video 📤",
-        type=["mp4", "mov", "avi", "m4v", "jpg", "png", "jpeg"],
+        "Upload an image 📤",
+        type=["jpg", "png", "jpeg"],  # ลบ video types ออก
     )
 
-    if st.button("Use Webcam 📷" if not st.session_state.is_webcam_active else "Stop Webcam 🛑"):
-        st.session_state.is_webcam_active = not st.session_state.is_webcam_active
-        st.session_state.is_detecting = st.session_state.is_webcam_active
+    # ลบ webcam functionality ออกทั้งหมด
+    # if st.button("Use Webcam 📷" if not st.session_state.is_webcam_active else "Stop Webcam 🛑"):
+    #     st.session_state.is_webcam_active = not st.session_state.is_webcam_active
+    #     st.session_state.is_detecting = st.session_state.is_webcam_active
 
     detect_button = st.button(
         ("Start Detection ▶️" if not st.session_state.is_detecting else "Stop Detection 🛑"),
-        disabled=(not uploaded_file and not st.session_state.is_webcam_active),
+        disabled=(not uploaded_file),  # ลบ webcam condition ออก
     )
 
     if detect_button:
@@ -233,45 +202,19 @@ with st.sidebar:
         st.error("🗑️ **Trash:** Dispose in the **GENERAL** bin.")
 
 # ------------------------------------------------
-# Main Content
+# Main Content - ลบ webcam functionality ออก
 # ------------------------------------------------
 if st.session_state.is_detecting:
-    if st.session_state.is_webcam_active:
-        st.info("Detecting objects using webcam...")
-        if st.session_state.yolo_model:
-            processor_factory = partial(
-                YOLOProcessor,
-                yolo_model=st.session_state.yolo_model,
-                conf_threshold=st.session_state.confidence_threshold
-            )
-
-            # RTC Configuration สำหรับ webcam
-            rtc_configuration = RTCConfiguration(
-                {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-            )
-
-            webrtc_streamer(
-                key="yolo-stream",
-                video_processor_factory=processor_factory,
-                rtc_configuration=rtc_configuration,
-            )
-
-            if "detected_classes" in st.session_state:
-                display_detection_messages(st.session_state.detected_classes)
-        else:
-            st.error("YOLO model is not loaded. Please check the logs for errors.")
-
-    elif uploaded_file:
+    if uploaded_file:
         file_extension = uploaded_file.name.split(".")[-1].lower()
         if file_extension in ["jpg", "jpeg", "png"]:
             st.info("Detecting objects in image...")
             image_detection(uploaded_file, confidence_threshold, selected_classes)
         else:
-            st.warning("Video processing not implemented in this version")
-
+            st.warning("Only image files are supported in this version")
 else:
     st.title("Smart Garbage Detection & Sorting Assistant")
-    st.info("Upload an image or video, or start the webcam for object detection.")
+    st.info("Upload an image for object detection.")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -280,7 +223,6 @@ else:
         This project helps people sort garbage more easily.
 
         **Features:**
-        - Real-time object detection via webcam
         - Image analysis
         - Smart disposal recommendations
         - Multiple waste categories supported
@@ -289,7 +231,7 @@ else:
     with col2:
         st.write("""
         ### 📖 How to Use:
-        1. **Upload** an image or use your **webcam**
+        1. **Upload** an image 
         2. **Adjust** confidence threshold as needed
         3. **Select** specific classes to detect (optional)
         4. **Start detection** and follow the disposal instructions

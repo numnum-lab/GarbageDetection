@@ -1,11 +1,7 @@
-streamlit==1.38.0
+streamlit
 ultralytics==8.3.202
-opencv-python==4.9.0.80
-Pillow==10.3.0
-numpy==1.26.4
-pandas==2.2.2
-scikit-learn==1.5.1
-torch==2.3.1
-streamlit-webrtc==0.47.1
-huggingface_hub==0.24.5
-av
+opencv-contrib-python-headless
+Pillow
+numpy
+torch>=1.8.0
+huggingface-hub
