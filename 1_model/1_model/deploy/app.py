@@ -250,11 +250,16 @@ else:
 
         The system will automatically provide disposal guidance for detected items!
         """)
-    cap = cv2.VideoCapture(0)
+    cam = cv2.VideoCapture(0)
+    cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    FRAME_WINDOW = st.image([])
+    
     while True:
-        ret, frame = cap.read()
+        ret, frame = cam.read()
         if not ret:
-            break
-    results = load_yolo_model(frame)
-    annotated_frame = results[0].plot()
-    st.image(annotated_frame, channels="BGR")
+            st.error("Failed to capture frame from camera")
+            st.info("Please turn off the other app that is using the camera and restart app")
+            st.stop()
+        image, name, id = image_detection(frame)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
