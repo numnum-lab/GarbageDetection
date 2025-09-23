@@ -12,12 +12,6 @@ import queue
 # ------------------------------------------------
 # Initial Session State
 # ------------------------------------------------
-# Store camera mode in session state
-if 'camera_mode' not in st.session_state:
-    st.session_state.camera_mode = camera_mode
-else:
-    st.session_state.camera_mode = camera_mode
-
 if "is_webcam_active" not in st.session_state:
     st.session_state.is_webcam_active = False
 
@@ -412,6 +406,13 @@ with st.sidebar:
         help="Different approaches to camera-based detection"
     )
 
+    # Store camera mode in session state
+    if 'camera_mode' not in st.session_state:
+        st.session_state.camera_mode = camera_mode
+    else:
+        st.session_state.camera_mode = camera_mode
+
+    
     # Real-time webcam button (updated text)
     if st.button("Start Camera Detection 📷" if not st.session_state.is_webcam_active else "Stop Camera Detection 🛑"):
         st.session_state.is_webcam_active = not st.session_state.is_webcam_active
