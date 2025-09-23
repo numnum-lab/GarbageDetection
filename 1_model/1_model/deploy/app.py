@@ -215,7 +215,7 @@ if st.session_state.is_detecting:
                 break
             results = model(frame)
             annotated_frame = results[0].plot()
-            stframe.image(annotated_frame, channels="BGR"))
+            stframe.image(annotated_frame, channels="BGR")
         
         if camera_image is not None:
             st.info("Processing camera image...")
